@@ -9,7 +9,7 @@
 
 ## 1. Summary
 
-JobAgent is a multi-agent AI system that automates the end-to-end job application pipeline. It analyzes job descriptions, tailors resumes for ATS keyword matching, auto-fills applications on ATS-backed career pages, generates personalized cover letters, tracks application status live, and schedules confirmed interviews to Google Calendar. Four coordinated agents are orchestrated by n8n, with Anthropic Claude as the reasoning layer.
+JobAgent is a multi-agent AI system that automates the end-to-end job application pipeline. It analyzes job descriptions, tailors resumes for ATS keyword matching, auto-fills applications on ATS-backed career pages, generates personalized cover letters, tracks application status live, and schedules confirmed interviews to Google Calendar. Four coordinated agents are orchestrated by n8n, with OpenAI as the reasoning layer.
 
 ## 2. Problem
 
@@ -88,7 +88,7 @@ Detailed responsibilities and interfaces live in the Architecture doc. At the PR
 
 ## 10. Tech stack (decisions locked)
 
-- **LLM / reasoning:** Anthropic Claude (via API).
+- **LLM / reasoning:** OpenAI (via API).
 - **Orchestration:** n8n.
 - **Deployment:** Cloud / hosted.
 - **Browser automation:** Playwright (proposed, confirm in architecture) running against a hosted headless-browser setup.

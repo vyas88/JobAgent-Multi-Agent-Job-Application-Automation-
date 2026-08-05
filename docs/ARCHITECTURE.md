@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-JobAgent is four logical agents coordinated by n8n, with Anthropic Claude as the reasoning layer and a Playwright service handling browser work. Each "agent" is a role, implemented as one or more Claude calls with a dedicated system prompt (plus, for the Application Agent, the Playwright service). n8n owns control flow, scheduling, retries, and glue. Claude owns reasoning. The two never blur: n8n decides *when* and *in what order*, Claude decides *what the content should be*.
+JobAgent is four logical agents coordinated by n8n, with OpenAI as the reasoning layer and a Playwright service handling browser work. Each "agent" is a role, implemented as one or more OpenAI calls with a dedicated system prompt (plus, for the Application Agent, the Playwright service). n8n owns control flow, scheduling, retries, and glue. OpenAI owns reasoning. The two never blur: n8n decides *when* and *in what order*, OpenAI decides *what the content should be*.
 
 ```mermaid
 flowchart TD
@@ -28,8 +28,8 @@ flowchart TD
     WD --> A3
     WE --> A4[Tracking & Scheduling Agent]
 
-    A1 -->|Claude| C[(Anthropic Claude API)]
-    A2 -->|Claude| C
+    A1 -->|OpenAI| C[(OpenAI API)]
+    A2 -->|OpenAI| C
     A3 -->|browser| P[Playwright service]
     A4 -->|calendar| G[Google Calendar API]
 
@@ -45,15 +45,15 @@ flowchart TD
 
 ### 2.1 Discovery and Analysis Agent
 - **Input:** one or more career-page URLs (Greenhouse / Lever / Workday).
-- **Work:** fetch the page (via the Playwright service for JS-rendered pages), extract JD text, then Claude parses it into structured requirements and a ranked keyword list, and scores fit against the master Profile.
+- **Work:** fetch the page (via the Playwright service for JS-rendered pages), extract JD text, then OpenAI parses it into structured requirements and a ranked keyword list, and scores fit against the master Profile.
 - **Output:** a `Job` record with `requirements`, `keywords`, `fit_score`, `raw_jd`. Low-fit jobs are flagged and dropped from the pipeline.
-- **Tools:** Playwright service (fetch/render), Claude.
+- **Tools:** Playwright service (fetch/render), OpenAI.
 
 ### 2.2 Resume and Content Agent
 - **Input:** a qualifying `Job` + the master `Profile`.
-- **Work:** Claude tailors resume content to the job's keywords under a strict no-fabrication rule (rephrase and reorder only), then generates a role-specific cover letter referencing the company and title.
+- **Work:** OpenAI tailors resume content to the job's keywords under a strict no-fabrication rule (rephrase and reorder only), then generates a role-specific cover letter referencing the company and title.
 - **Output:** a `ResumeVariant` and a `CoverLetter` linked to the job.
-- **Tools:** Claude.
+- **Tools:** OpenAI.
 
 ### 2.3 Application Agent
 - **Input:** `Job` + `ResumeVariant` + `CoverLetter` + Profile contact fields.
@@ -82,7 +82,7 @@ n8n handles retries, backoff, and rate limiting so the 50+/week volume respects 
 
 ## 4. Data model
 
-Store: **managed Postgres (Supabase or Neon).** *(Assumption, confirm. Supabase adds easy auth + a hosted UI, useful if a review UI comes later.)*
+Store: **managed Postgres (Neon).** Decision locked.
 
 Core entities:
 - **Profile:** the master resume/profile (canonical source of content). One per user.
@@ -101,10 +101,10 @@ Status enum: `draft -> pre_filled -> pending_review -> approved -> submitted -> 
 - **Shape:** a standalone containerized Playwright microservice (e.g., FastAPI + Playwright) that n8n calls over HTTP. Keeps browser concerns out of n8n and lets automation scale and fail independently.
 - **Resilience:** per-platform adapters (one each for Greenhouse, Lever, Workday). If a selector breaks or a CAPTCHA appears, the agent flags the application for manual completion instead of failing the whole run.
 
-## 6. LLM integration (Claude)
+## 6. LLM integration (OpenAI)
 
 - Each agent role = a dedicated system prompt + a defined input/output contract (prefer structured JSON out for parseable steps).
-- Scraped JD and page text is **untrusted data**, never instructions. System prompts explicitly tell Claude to ignore any directives embedded in job text.
+- Scraped JD and page text is **untrusted data**, never instructions. System prompts explicitly tell OpenAI to ignore any directives embedded in job text.
 - Keep prompts versioned in the repo (e.g., `/prompts`) so they're reviewable and diffable.
 
 ## 7. Integrations
@@ -115,8 +115,8 @@ Status enum: `draft -> pre_filled -> pending_review -> approved -> submitted -> 
 
 - **n8n:** n8n Cloud or self-hosted container (Railway / Render).
 - **Playwright service:** containerized on Render / Railway / Fly.
-- **Postgres:** Supabase / Neon.
-- **Claude:** Anthropic API.
+- **Postgres:** Neon.
+- **LLM:** OpenAI API.
 - **Secrets:** managed via n8n credentials + platform secret stores. Never in code, never in prompts.
 
 ## 9. Security architecture
@@ -129,10 +129,10 @@ Status enum: `draft -> pre_filled -> pending_review -> approved -> submitted -> 
 
 ## 10. Locked vs open
 
-**Locked:** Claude as LLM, n8n orchestration, cloud/hosted, four-agent structure, human-in-the-loop before submit, one master profile, per-platform Playwright adapters starting with Greenhouse/Lever/Workday.
+**Locked:** OpenAI as LLM, n8n orchestration, cloud/hosted, four-agent structure, human-in-the-loop before submit, one master profile, per-platform Playwright adapters starting with Greenhouse/Lever/Workday.
 
 **Confirm before build:**
-- [ ] Postgres provider (Supabase vs Neon)
+- [x] Postgres provider: **Neon** (confirmed)
 - [ ] Playwright as the automation library
 - [ ] v1 entry point = a URL list (vs a small UI)
-- [ ] Structured JSON as the Claude output contract for parseable steps
+- [ ] Structured JSON as the OpenAI output contract for parseable steps

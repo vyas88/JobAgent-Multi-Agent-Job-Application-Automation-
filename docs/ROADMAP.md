@@ -19,13 +19,13 @@ Feed **one phase at a time**. For each phase: let the agent read this file plus 
 **Deliverables:**
 - Repo structure organized around the four agents and the Playwright service.
 - Postgres schema for the entities in ARCHITECTURE.md Section 4, with migrations.
-- A Claude API client wrapper (structured JSON in/out, prompts loaded from `/prompts`).
+- An OpenAI API client wrapper (structured JSON in/out, prompts loaded from `/prompts`).
 - Environment/secrets scaffolding (env vars only, no real secrets).
 - n8n instance reachable (cloud or self-hosted container).
 - Test harness plus a `fixtures/` folder, and a CI skeleton that runs unit tests with no live-portal or real-credential calls.
 - A sample master `Profile` fixture and one saved Greenhouse job-page fixture.
 
-**Done when:** the repo builds, migrations create the schema, the Claude wrapper returns a parsed JSON response in a test, and CI runs green on an empty test suite.
+**Done when:** the repo builds, migrations create the schema, the OpenAI wrapper returns a parsed JSON response in a test, and CI runs green on an empty test suite.
 
 ---
 
@@ -36,7 +36,7 @@ Feed **one phase at a time**. For each phase: let the agent read this file plus 
 **Deliverables:**
 - Playwright service skeleton with a Greenhouse fetch/render adapter.
 - JD text extraction from the rendered page.
-- Claude prompt: JD text to structured requirements + ranked keyword list.
+- OpenAI prompt: JD text to structured requirements + ranked keyword list.
 - Fit scoring against the master Profile fixture.
 - Persist a `Job` record with requirements, keywords, and fit_score.
 - Tests against the saved Greenhouse fixture (no live calls).
@@ -50,8 +50,8 @@ Feed **one phase at a time**. For each phase: let the agent read this file plus 
 **Goal:** tailored resume + cover letter per job, without fabrication.
 
 **Deliverables:**
-- Claude prompt: tailor the master Profile to the job's keywords (rephrase/reorder only) into a `ResumeVariant`.
-- Claude prompt: generate a role-specific `CoverLetter` referencing company and title.
+- OpenAI prompt: tailor the master Profile to the job's keywords (rephrase/reorder only) into a `ResumeVariant`.
+- OpenAI prompt: generate a role-specific `CoverLetter` referencing company and title.
 - Persist both, linked to the `Job`.
 - Tests asserting target keywords appear and that no content exists outside the master Profile (no-fabrication check).
 

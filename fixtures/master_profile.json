@@ -1,0 +1,77 @@
+{
+    "full_name": "Alex Johnson",
+    "email": "alex.johnson@example.com",
+    "phone": "+1-555-0199",
+    "location": "San Francisco, CA",
+    "summary": "Full-stack software engineer with 6 years of experience building scalable web applications. Specializes in Python, TypeScript, and cloud-native architectures. Passionate about developer tools and automation.",
+    "experience": [
+        {
+            "title": "Senior Software Engineer",
+            "company": "TechCorp Inc.",
+            "dates": "2022-01 to present",
+            "bullets": [
+                "Led development of a microservices platform serving 2M+ daily requests using Python, FastAPI, and PostgreSQL.",
+                "Designed and implemented CI/CD pipelines reducing deployment time by 60%.",
+                "Mentored a team of 4 junior engineers through code reviews and pair programming.",
+                "Integrated third-party APIs (Stripe, Twilio, SendGrid) for payment and notification workflows."
+            ]
+        },
+        {
+            "title": "Software Engineer",
+            "company": "DataFlow Systems",
+            "dates": "2019-06 to 2021-12",
+            "bullets": [
+                "Built ETL pipelines processing 500GB+ daily using Python and Apache Airflow.",
+                "Developed a React-based dashboard for real-time data visualization.",
+                "Optimized PostgreSQL queries reducing p95 latency from 800ms to 120ms.",
+                "Wrote comprehensive unit and integration tests achieving 92% code coverage."
+            ]
+        },
+        {
+            "title": "Junior Developer",
+            "company": "WebStart Agency",
+            "dates": "2018-01 to 2019-05",
+            "bullets": [
+                "Developed responsive web applications using HTML, CSS, JavaScript, and React.",
+                "Collaborated with designers to implement pixel-perfect UI components.",
+                "Maintained and extended WordPress and Django-based client sites."
+            ]
+        }
+    ],
+    "education": [
+        {
+            "degree": "B.S. Computer Science",
+            "institution": "University of California, Berkeley",
+            "year": 2017
+        }
+    ],
+    "skills": [
+        "Python",
+        "TypeScript",
+        "JavaScript",
+        "React",
+        "FastAPI",
+        "Django",
+        "PostgreSQL",
+        "Redis",
+        "Docker",
+        "Kubernetes",
+        "AWS",
+        "CI/CD",
+        "Git",
+        "REST APIs",
+        "GraphQL",
+        "Apache Airflow",
+        "Terraform",
+        "Linux",
+        "Agile/Scrum"
+    ],
+    "certifications": [
+        "AWS Certified Solutions Architect – Associate"
+    ],
+    "links": {
+        "github": "https://github.com/alexjohnson-example",
+        "linkedin": "https://linkedin.com/in/alexjohnson-example",
+        "portfolio": "https://alexjohnson.example.com"
+    }
+}

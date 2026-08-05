@@ -12,7 +12,7 @@ Read both before planning. Do not invent scope that isn't in the PRD.
 
 ## Stack (locked)
 
-- Reasoning: Anthropic Claude via API.
+- Reasoning: OpenAI via API.
 - Orchestration: n8n.
 - Browser automation: Playwright, in a standalone containerized service called by n8n over HTTP.
 - Data store: managed Postgres.
