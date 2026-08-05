@@ -170,3 +170,4 @@ class TestCallOpenAI:
 
         call_args = mock_client.chat.completions.create.call_args
         assert call_args.kwargs["response_format"] == {"type": "json_object"}
+        assert call_args.kwargs["model"] == "gpt-4.1"
