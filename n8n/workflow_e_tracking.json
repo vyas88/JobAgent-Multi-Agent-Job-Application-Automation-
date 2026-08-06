@@ -1,0 +1,286 @@
+{
+  "name": "JobAgent - Workflow E: Status & Interview Scheduling",
+  "nodes": [
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "action",
+              "value": "interview"
+            },
+            {
+              "name": "application_id",
+              "value": "00000000-0000-0000-0000-000000000001"
+            },
+            {
+              "name": "new_status",
+              "value": "in_review"
+            },
+            {
+              "name": "scheduled_at",
+              "value": "2026-08-20T15:00:00Z"
+            },
+            {
+              "name": "notes",
+              "value": "Technical Onsite Interview"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e1f2a3b4-0005-4000-8000-000000000001",
+      "name": "Manual Trigger (Action & Params)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "string": [
+                  {
+                    "value1": "={{ $json.action }}",
+                    "operation": "equal",
+                    "value2": "status_update"
+                  }
+                ]
+              }
+            },
+            {
+              "conditions": {
+                "string": [
+                  {
+                    "value1": "={{ $json.action }}",
+                    "operation": "equal",
+                    "value2": "interview"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "id": "e1f2a3b4-0005-4000-8000-000000000002",
+      "name": "Switch: Action Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.JOBAGENT_BASE_URL || 'http://host.docker.internal:8000' }}/applications/{{ $json.application_id }}/status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"new_status\": \"{{ $json.new_status }}\",\n  \"reason\": \"{{ $json.reason || 'Status update via n8n' }}\"\n}",
+        "options": {
+          "neverError": true
+        }
+      },
+      "id": "e1f2a3b4-0005-4000-8000-000000000003",
+      "name": "POST /applications/{id}/status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        800,
+        200
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "jobagent-api-key",
+          "name": "JobAgent API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.JOBAGENT_BASE_URL || 'http://host.docker.internal:8000' }}/applications/{{ $json.application_id }}/interview",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"scheduled_at\": \"{{ $json.scheduled_at }}\",\n  \"notes\": \"{{ $json.notes }}\"\n}",
+        "options": {
+          "neverError": true
+        }
+      },
+      "id": "e1f2a3b4-0005-4000-8000-000000000004",
+      "name": "POST /applications/{id}/interview",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        800,
+        400
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "jobagent-api-key",
+          "name": "JobAgent API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $response.statusCode }}",
+              "operation": "equal",
+              "value2": 500
+            }
+          ]
+        }
+      },
+      "id": "e1f2a3b4-0005-4000-8000-000000000005",
+      "name": "Is Orphaned Event Error (500)?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "alert",
+              "value": "CRITICAL: Orphaned Google Calendar Event Detected!"
+            },
+            {
+              "name": "calendar_event_id",
+              "value": "={{ $json.calendar_event_id }}"
+            },
+            {
+              "name": "error_detail",
+              "value": "={{ $json.detail }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e1f2a3b4-0005-4000-8000-000000000006",
+      "name": "Alert: Orphaned Calendar Event",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        1350,
+        350
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "Tracking Updated Successfully"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e1f2a3b4-0005-4000-8000-000000000007",
+      "name": "Output: Tracking Updated",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        1350,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger (Action & Params)": {
+      "main": [
+        [
+          {
+            "node": "Switch: Action Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: Action Type": {
+      "main": [
+        [
+          {
+            "node": "POST /applications/{id}/status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "POST /applications/{id}/interview",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /applications/{id}/interview": {
+      "main": [
+        [
+          {
+            "node": "Is Orphaned Event Error (500)?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Orphaned Event Error (500)?": {
+      "main": [
+        [
+          {
+            "node": "Alert: Orphaned Calendar Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Output: Tracking Updated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

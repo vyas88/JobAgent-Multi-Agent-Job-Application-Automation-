@@ -1,0 +1,255 @@
+{
+  "name": "JobAgent - Workflow B: Generate Content",
+  "nodes": [
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "job_id",
+              "value": "00000000-0000-0000-0000-000000000001"
+            },
+            {
+              "name": "profile_id",
+              "value": "00000000-0000-0000-0000-000000000002"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1c2d3e4-0002-4000-8000-000000000001",
+      "name": "Manual Trigger (Job & Profile ID)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.JOBAGENT_BASE_URL || 'http://host.docker.internal:8000' }}/content/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"job_id\": \"{{ $json.job_id }}\",\n  \"profile_id\": \"{{ $json.profile_id }}\"\n}",
+        "options": {
+          "neverError": true
+        }
+      },
+      "id": "b1c2d3e4-0002-4000-8000-000000000002",
+      "name": "POST /content/generate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        500,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "jobagent-api-key",
+          "name": "JobAgent API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $response.statusCode }}",
+              "operation": "equal",
+              "value2": 200
+            }
+          ]
+        }
+      },
+      "id": "b1c2d3e4-0002-4000-8000-000000000003",
+      "name": "Check Status == 200",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        750,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "Content Generated Successfully"
+            },
+            {
+              "name": "resume_variant_id",
+              "value": "={{ $json.persisted_resume.id }}"
+            },
+            {
+              "name": "cover_letter_id",
+              "value": "={{ $json.persisted_letter.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1c2d3e4-0002-4000-8000-000000000004",
+      "name": "Output: Content Ready",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $response.statusCode }}",
+              "operation": "equal",
+              "value2": 422
+            }
+          ]
+        }
+      },
+      "id": "b1c2d3e4-0002-4000-8000-000000000005",
+      "name": "Is Fabrication Error (422)?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "error_status",
+              "value": "422 Unprocessable Entity"
+            },
+            {
+              "name": "error_type",
+              "value": "fabrication_detected"
+            },
+            {
+              "name": "violations",
+              "value": "={{ JSON.stringify($json.violations) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1c2d3e4-0002-4000-8000-000000000006",
+      "name": "Alert: Fabrication Detected",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        350
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "error_status",
+              "value": "={{ $response.statusCode }}"
+            },
+            {
+              "name": "error_detail",
+              "value": "={{ $json.detail || 'Content generation failed' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1c2d3e4-0002-4000-8000-000000000007",
+      "name": "Error Handler: Content Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger (Job & Profile ID)": {
+      "main": [
+        [
+          {
+            "node": "POST /content/generate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /content/generate": {
+      "main": [
+        [
+          {
+            "node": "Check Status == 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Status == 200": {
+      "main": [
+        [
+          {
+            "node": "Output: Content Ready",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Fabrication Error (422)?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Fabrication Error (422)?": {
+      "main": [
+        [
+          {
+            "node": "Alert: Fabrication Detected",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Handler: Content Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

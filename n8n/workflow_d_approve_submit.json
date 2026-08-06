@@ -1,0 +1,367 @@
+{
+  "name": "JobAgent - Workflow D: Manual Approval & Submission Gate",
+  "nodes": [
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "application_id",
+              "value": "00000000-0000-0000-0000-000000000001"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d1e2f3a4-0004-4000-8000-000000000001",
+      "name": "Explicit Human Trigger (Input application_id)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.JOBAGENT_BASE_URL || 'http://host.docker.internal:8000' }}/applications/{{ $json.application_id }}",
+        "options": {
+          "neverError": true
+        }
+      },
+      "id": "d1e2f3a4-0004-4000-8000-000000000002",
+      "name": "GET /applications/{id} (Fetch Artifacts)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "jobagent-api-key",
+          "name": "JobAgent API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equal",
+              "value2": "pending_review"
+            }
+          ]
+        }
+      },
+      "id": "d1e2f3a4-0004-4000-8000-000000000003",
+      "name": "Is Status == 'pending_review'?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "error_status",
+              "value": "409 Conflict"
+            },
+            {
+              "name": "refusal_reason",
+              "value": "Approval refused: Application is not in pending_review status"
+            },
+            {
+              "name": "current_status",
+              "value": "={{ $json.status }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d1e2f3a4-0004-4000-8000-000000000004",
+      "name": "Refuse: Not Pending Review",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        950,
+        150
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.JOBAGENT_BASE_URL || 'http://host.docker.internal:8000' }}/applications/{{ $json.id }}/approve",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"reason\": \"Explicit human review approval via n8n Workflow D\"\n}",
+        "options": {
+          "neverError": true
+        }
+      },
+      "id": "d1e2f3a4-0004-4000-8000-000000000005",
+      "name": "POST /applications/{id}/approve",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        950,
+        450
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "jobagent-api-key",
+          "name": "JobAgent API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $response.statusCode }}",
+              "operation": "equal",
+              "value2": 200
+            }
+          ]
+        }
+      },
+      "id": "d1e2f3a4-0004-4000-8000-000000000006",
+      "name": "Approved Successfully?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        450
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.JOBAGENT_BASE_URL || 'http://host.docker.internal:8000' }}/applications/{{ $json.id }}/submit",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={}",
+        "options": {
+          "neverError": true
+        }
+      },
+      "id": "d1e2f3a4-0004-4000-8000-000000000007",
+      "name": "POST /applications/{id}/submit (Atomic Gate)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1450,
+        350
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "jobagent-api-key",
+          "name": "JobAgent API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $response.statusCode }}",
+              "operation": "equal",
+              "value2": 200
+            }
+          ]
+        }
+      },
+      "id": "d1e2f3a4-0004-4000-8000-000000000008",
+      "name": "Submitted Successfully?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1700,
+        350
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "submitted"
+            },
+            {
+              "name": "application_id",
+              "value": "={{ $json.id }}"
+            },
+            {
+              "name": "submitted_at",
+              "value": "={{ $json.submitted_at }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d1e2f3a4-0004-4000-8000-000000000009",
+      "name": "Output: Submitted",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        1950,
+        250
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "error_status",
+              "value": "={{ $response.statusCode }}"
+            },
+            {
+              "name": "error_type",
+              "value": "={{ $json.error_type || 'submit_error' }}"
+            },
+            {
+              "name": "error_detail",
+              "value": "={{ $json.detail || 'Submission failed' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d1e2f3a4-0004-4000-8000-000000000010",
+      "name": "Alert: Submit Failure (Check submit_uncertain)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        1950,
+        450
+      ]
+    }
+  ],
+  "connections": {
+    "Explicit Human Trigger (Input application_id)": {
+      "main": [
+        [
+          {
+            "node": "GET /applications/{id} (Fetch Artifacts)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET /applications/{id} (Fetch Artifacts)": {
+      "main": [
+        [
+          {
+            "node": "Is Status == 'pending_review'?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Status == 'pending_review'?": {
+      "main": [
+        [
+          {
+            "node": "POST /applications/{id}/approve",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Refuse: Not Pending Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /applications/{id}/approve": {
+      "main": [
+        [
+          {
+            "node": "Approved Successfully?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved Successfully?": {
+      "main": [
+        [
+          {
+            "node": "POST /applications/{id}/submit (Atomic Gate)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /applications/{id}/submit (Atomic Gate)": {
+      "main": [
+        [
+          {
+            "node": "Submitted Successfully?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submitted Successfully?": {
+      "main": [
+        [
+          {
+            "node": "Output: Submitted",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert: Submit Failure (Check submit_uncertain)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
