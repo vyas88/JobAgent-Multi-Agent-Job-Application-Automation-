@@ -17,4 +17,7 @@ psql "$DATABASE_URL" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
 echo "==> Applying migrations/001_init.sql..."
 psql "$DATABASE_URL" -f migrations/001_init.sql
 
-echo "==> Schema successfully applied to Neon!"
+echo "==> Applying migrations/002_add_submit_uncertain.sql..."
+psql "$DATABASE_URL" -f migrations/002_add_submit_uncertain.sql
+
+echo "==> All migrations successfully applied to Neon!"
