@@ -99,16 +99,14 @@ async def test_persist_job_live_neon_db() -> None:
             assert float(readback_updated["fit_score"]) == 95.00
 
     finally:
-        # 4. Clean up test rows in a finally block
+        # 4. Clean up ONLY test rows created by this test run using exact IDs
         async with pool.acquire() as conn:
-            await conn.execute("DELETE FROM jobs WHERE source_url = $1;", test_source_url)
-            await conn.execute("DELETE FROM profiles WHERE email = $1;", test_profile_email)
+            if 'res2' in locals() and res2 and "id" in res2:
+                await conn.execute("DELETE FROM jobs WHERE id = $1::uuid;", res2["id"])
+            elif test_source_url:
+                await conn.execute("DELETE FROM jobs WHERE source_url = $1;", test_source_url)
 
-            # Confirm cleanup left DB empty of test rows
-            remaining_jobs = await conn.fetchval("SELECT COUNT(*) FROM jobs WHERE source_url = $1;", test_source_url)
-            remaining_profiles = await conn.fetchval("SELECT COUNT(*) FROM profiles WHERE email = $1;", test_profile_email)
-
-            assert remaining_jobs == 0
-            assert remaining_profiles == 0
+            if 'profile_id' in locals() and profile_id:
+                await conn.execute("DELETE FROM profiles WHERE id = $1::uuid;", profile_id)
 
         await pool.close()

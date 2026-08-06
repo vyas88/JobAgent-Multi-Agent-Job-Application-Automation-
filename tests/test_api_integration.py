@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
+from uuid import uuid4
+
 import asyncpg
 import httpx
 import pytest
@@ -46,9 +48,14 @@ async def test_api_full_pipeline_end_to_end_live_db(tmp_path: Path) -> None:
         api_key="dev-api-key",
     )
     app.dependency_overrides[get_settings] = lambda: mock_settings
-
-    test_source_url = f"https://boards.greenhouse.io/testco/jobs/{hash(file_url) & 0xFFFFFF}"
+    profile_email = f"api.test.{uuid4()}@example.com"
+    test_source_url = f"https://boards.greenhouse.io/testco/jobs/{uuid4()}"
     profile_data = json.loads(Path("fixtures/master_profile.json").read_text(encoding="utf-8"))
+
+    profile_id = None
+    job_id = None
+    resume_variant_id = None
+    app_id = None
 
     try:
         # Seed Profile & Job directly in Neon DB (bypasses real OpenAI & external Playwright container)
@@ -60,7 +67,7 @@ async def test_api_full_pipeline_end_to_end_live_db(tmp_path: Path) -> None:
                 RETURNING id;
                 """,
                 profile_data["full_name"],
-                profile_data["email"],
+                profile_email,
                 profile_data["phone"],
                 json.dumps(profile_data["links"]),
             )
@@ -92,7 +99,7 @@ async def test_api_full_pipeline_end_to_end_live_db(tmp_path: Path) -> None:
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            # 1. POST /applications/prefill
+            # 1. POST /applications/prefill -> EXPECT 200 (creates pending_review application row)
             prefill_res = await client.post(
                 "/applications/prefill",
                 json={
@@ -176,14 +183,18 @@ async def test_api_full_pipeline_end_to_end_live_db(tmp_path: Path) -> None:
             assert get_job_res.json()["title"] == "Lead API Engineer"
 
     finally:
-        # Clean up test rows in Neon DB
+        # Clean up ONLY test rows created by this specific test run using exact UUIDs
         async with pool.acquire() as conn:
-            await conn.execute("DELETE FROM interviews WHERE application_id IN (SELECT id FROM applications WHERE job_id IN (SELECT id FROM jobs WHERE source_url = $1));", test_source_url)
-            await conn.execute("DELETE FROM status_history WHERE application_id IN (SELECT id FROM applications WHERE job_id IN (SELECT id FROM jobs WHERE source_url = $1));", test_source_url)
-            await conn.execute("DELETE FROM applications WHERE job_id IN (SELECT id FROM jobs WHERE source_url = $1);", test_source_url)
-            await conn.execute("DELETE FROM resume_variants WHERE job_id IN (SELECT id FROM jobs WHERE source_url = $1);", test_source_url)
-            await conn.execute("DELETE FROM jobs WHERE source_url = $1;", test_source_url)
-            await conn.execute("DELETE FROM profiles WHERE email = $1;", profile_data["email"])
+            if app_id:
+                await conn.execute("DELETE FROM interviews WHERE application_id = $1::uuid;", app_id)
+                await conn.execute("DELETE FROM status_history WHERE application_id = $1::uuid;", app_id)
+                await conn.execute("DELETE FROM applications WHERE id = $1::uuid;", app_id)
+            if job_id:
+                await conn.execute("DELETE FROM cover_letters WHERE job_id = $1::uuid;", job_id)
+                await conn.execute("DELETE FROM resume_variants WHERE job_id = $1::uuid;", job_id)
+                await conn.execute("DELETE FROM jobs WHERE id = $1::uuid;", job_id)
+            if profile_id:
+                await conn.execute("DELETE FROM profiles WHERE id = $1::uuid;", profile_id)
 
         await pool.close()
         app.dependency_overrides.clear()

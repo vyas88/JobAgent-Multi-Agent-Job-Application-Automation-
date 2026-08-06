@@ -11,6 +11,7 @@ Responsibilities (ARCHITECTURE.md §2.2):
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 import json
 import logging
 import re
@@ -19,6 +20,7 @@ from typing import Any, Union
 import asyncpg
 from pydantic import BaseModel, Field
 
+from src.db import parse_db_row
 from src.llm.openai_client import call_openai
 
 logger = logging.getLogger(__name__)
@@ -129,8 +131,70 @@ class NumericClaim:
     context_tokens: set[str]
 
 
+METRIC_CONTEXT_KEYWORDS: set[str] = {
+    "percent", "percentage", "efficiency", "requests", "users", "engineers",
+    "people", "team", "members", "devs", "developers", "growth", "latency",
+    "pipelines", "coverage", "clients", "customers", "teams", "projects",
+    "applications", "services", "database", "rows", "queries", "points",
+    "hours", "days", "weeks", "months", "years", "fold", "ratio", "scale",
+    "throughput", "concurrency", "transactions", "records", "files",
+    "documents", "subscribers", "sales", "revenue", "dollars", "downloads",
+    "installs", "visits", "views", "hits", "tasks", "tickets", "issues",
+    "bugs", "components", "endpoints", "microservices", "models", "datasets",
+    "nodes", "clusters", "instances", "servers", "cores", "cpu", "ram", "storage",
+    "reduction", "increase", "decrease", "boost", "improvement", "reduced", "improved",
+    "code", "p95", "latency", "dashboard", "dashboards"
+}
+
+
+def strip_non_metric_patterns(text: str) -> str:
+    """Strip contact info (phone numbers, emails, URLs) and standalone years prior to metric claim extraction."""
+    # Strip URLs
+    text = re.sub(r"https?://\S+|www\.\S+", " ", text)
+    # Strip emails
+    text = re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", " ", text)
+    # Strip phone numbers (+1-555-0199, (555) 019-9999, +1 555 019 9999, 555-0199, etc.)
+    text = re.sub(r"(\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b", " ", text)
+    text = re.sub(r"\+?\d[\d\s\.\-\(\)]{7,}\d", " ", text)
+    # Strip standalone 4-digit years (1900-2099) or year-month (2022-01)
+    text = re.sub(r"\b(19\d\d|20\d\d)(?:-\d{2})?\b", " ", text)
+    return text
+
+
+def extract_all_numbers(text: str) -> set[str]:
+    """Extract all standalone digit sequences and number strings from text for profile number matching."""
+    cleaned = strip_non_metric_patterns(text)
+    # Remove alphanumeric identifiers like p95, v2, x86
+    cleaned = re.sub(r"\b[a-zA-Z]+\d+\w*\b|\b\w*\d+[a-zA-Z]+\b", " ", cleaned)
+    numbers: set[str] = set()
+    for digits in re.findall(r"\b\d+\b", cleaned):
+        numbers.add(digits)
+        stripped = digits.lstrip("0")
+        if stripped:
+            numbers.add(stripped)
+            try:
+                numbers.add(str(float(stripped)))
+                numbers.add(str(int(stripped)))
+            except ValueError:
+                pass
+    return numbers
+
+
+def is_metric_claim(claim: NumericClaim) -> bool:
+    """Return True if the claim carries explicit metric units, multipliers, or metric context tokens."""
+    if claim.unit in {"%", "$", "ms", "gb", "tb", "mb"}:
+        return True
+    raw_lower = claim.raw_str.lower()
+    if any(m in raw_lower for m in ["million", "billion", "thousand", "%", "$", "m", "b", "k", "x", "+"]):
+        return True
+    if claim.context_tokens.intersection(METRIC_CONTEXT_KEYWORDS):
+        return True
+    return False
+
+
 def extract_numeric_claims(text: str) -> list[NumericClaim]:
     """Extract all numeric claims with their normalized values, units, and context tokens."""
+    cleaned_text = strip_non_metric_patterns(text)
     claims: list[NumericClaim] = []
 
     pattern = re.compile(
@@ -138,10 +202,10 @@ def extract_numeric_claims(text: str) -> list[NumericClaim]:
         re.IGNORECASE,
     )
 
-    for match in re.finditer(pattern, text):
+    for match in re.finditer(pattern, cleaned_text):
         start = match.start()
         # Skip token if it is part of an identifier like p95 or v2
-        if start > 0 and text[start - 1].isalpha():
+        if start > 0 and cleaned_text[start - 1].isalpha():
             continue
 
         raw_match = match.group(0).strip()
@@ -155,8 +219,8 @@ def extract_numeric_claims(text: str) -> list[NumericClaim]:
         end_char = match.end()
 
         # Restrict context tokens to current line/sentence segment to prevent cross-bullet leaks
-        before_segment = re.split(r"[\n.;]", text[:start])[-1]
-        after_segment = re.split(r"[\n.;]", text[end_char:])[0]
+        before_segment = re.split(r"[\n.;]", cleaned_text[:start])[-1]
+        after_segment = re.split(r"[\n.;]", cleaned_text[end_char:])[0]
 
         before_words = re.findall(r"\b[a-zA-Z0-9]+\b", before_segment.lower())[-3:]
         after_words = re.findall(r"\b[a-zA-Z0-9]+\b", after_segment.lower())[:3]
@@ -176,27 +240,52 @@ def extract_numeric_claims(text: str) -> list[NumericClaim]:
 
 
 def extract_profile_text(profile: dict[str, Any]) -> str:
-    """Combine all text fields in master profile into a single canonical string."""
+    """Combine all text and contact fields in master profile into a single canonical string."""
+    profile = parse_db_row(profile)
     parts: list[str] = []
+    if name := profile.get("full_name"):
+        parts.append(str(name))
+    if email := profile.get("email"):
+        parts.append(str(email))
+    if phone := profile.get("phone"):
+        parts.append(str(phone))
+    if location := profile.get("location"):
+        parts.append(str(location))
     if summary := profile.get("summary"):
         parts.append(str(summary))
+    if links := profile.get("links"):
+        if isinstance(links, dict):
+            parts.extend(str(v) for v in links.values())
+        elif isinstance(links, list):
+            parts.extend(str(v) for v in links)
+        else:
+            parts.append(str(links))
 
     for exp in profile.get("experience", []):
-        if title := exp.get("title"):
-            parts.append(str(title))
-        if company := exp.get("company"):
-            parts.append(str(company))
-        for bullet in exp.get("bullets", []):
-            parts.append(str(bullet))
+        if isinstance(exp, dict):
+            if title := exp.get("title"):
+                parts.append(str(title))
+            if company := exp.get("company"):
+                parts.append(str(company))
+            if dates := exp.get("dates"):
+                parts.append(str(dates))
+            for bullet in exp.get("bullets", []):
+                parts.append(str(bullet))
 
     for edu in profile.get("education", []):
-        if degree := edu.get("degree"):
-            parts.append(str(degree))
-        if inst := edu.get("institution"):
-            parts.append(str(inst))
+        if isinstance(edu, dict):
+            if degree := edu.get("degree"):
+                parts.append(str(degree))
+            if inst := edu.get("institution"):
+                parts.append(str(inst))
+            if year := edu.get("year"):
+                parts.append(str(year))
 
     for cert in profile.get("certifications", []):
         parts.append(str(cert))
+
+    for skill in profile.get("skills", []):
+        parts.append(str(skill))
 
     return "\n".join(parts)
 
@@ -210,16 +299,18 @@ def verify_resume_no_fabrication(
     Returns:
         (is_valid, hard_violations, needs_review_items)
     """
+    profile = parse_db_row(profile)
     hard_violations: list[str] = []
     needs_review: list[str] = []
 
     profile_text = extract_profile_text(profile)
+    profile_numbers = extract_all_numbers(profile_text)
     profile_numeric_claims = extract_numeric_claims(profile_text)
 
     # 1. Company & Title check
     master_exp = profile.get("experience", [])
-    valid_companies = {exp.get("company", "").strip().lower() for exp in master_exp}
-    valid_titles = {exp.get("title", "").strip().lower() for exp in master_exp}
+    valid_companies = {exp.get("company", "").strip().lower() for exp in master_exp if isinstance(exp, dict)}
+    valid_titles = {exp.get("title", "").strip().lower() for exp in master_exp if isinstance(exp, dict)}
 
     for exp in resume.experience:
         if exp.company.strip().lower() not in valid_companies:
@@ -246,17 +337,19 @@ def verify_resume_no_fabrication(
     generated_numeric_claims = extract_numeric_claims(resume_text)
 
     for gen_claim in generated_numeric_claims:
-        # Match normalized numeric value against profile claims
         matching_profile_claims = [
             pc for pc in profile_numeric_claims if abs(pc.norm_val - gen_claim.norm_val) < 0.01
         ]
 
-        if not matching_profile_claims:
-            hard_violations.append(
-                f"Invented numeric metric: '{gen_claim.raw_str}' not present in master profile."
-            )
-        else:
-            # Number matches; verify unit and context match
+        raw_digits = re.findall(r"\d+", gen_claim.raw_str)
+        raw_digit_str = "".join(raw_digits)
+        is_in_profile = (
+            raw_digit_str in profile_numbers
+            or str(int(gen_claim.norm_val)) in profile_numbers
+            or str(gen_claim.norm_val) in profile_numbers
+        )
+
+        if matching_profile_claims:
             context_match = False
             for pc in matching_profile_claims:
                 if pc.unit == gen_claim.unit:
@@ -270,6 +363,16 @@ def verify_resume_no_fabrication(
                     f"Numeric metric '{gen_claim.raw_str}' exists in profile, but unit/context differs "
                     f"(generated context tokens: {sorted(list(gen_claim.context_tokens))})."
                 )
+        elif is_in_profile:
+            continue
+        elif not is_metric_claim(gen_claim):
+            needs_review.append(
+                f"Unverified bare number in text: '{gen_claim.raw_str}' (needs human review)."
+            )
+        else:
+            hard_violations.append(
+                f"Invented numeric metric: '{gen_claim.raw_str}' not present in master profile."
+            )
 
     is_valid = len(hard_violations) == 0
     return is_valid, hard_violations, needs_review
@@ -289,12 +392,13 @@ def verify_cover_letter_no_fabrication(
     needs_review: list[str] = []
 
     profile_text = extract_profile_text(profile)
+    profile_numbers = extract_all_numbers(profile_text)
     profile_numeric_claims = extract_numeric_claims(profile_text)
 
     # Add job requirements metrics if mentioned
     job_req_text = " ".join(job.get("requirements", []))
-    job_numeric_claims = extract_numeric_claims(job_req_text)
-    allowed_numeric_claims = profile_numeric_claims + job_numeric_claims
+    allowed_numbers = profile_numbers.union(extract_all_numbers(job_req_text))
+    allowed_numeric_claims = profile_numeric_claims + extract_numeric_claims(job_req_text)
 
     letter_text = cover_letter_res.cover_letter
     letter_numeric_claims = extract_numeric_claims(letter_text)
@@ -304,11 +408,15 @@ def verify_cover_letter_no_fabrication(
             pc for pc in allowed_numeric_claims if abs(pc.norm_val - gen_claim.norm_val) < 0.01
         ]
 
-        if not matching_claims:
-            hard_violations.append(
-                f"Invented numeric metric in cover letter: '{gen_claim.raw_str}'."
-            )
-        else:
+        raw_digits = re.findall(r"\d+", gen_claim.raw_str)
+        raw_digit_str = "".join(raw_digits)
+        is_in_profile = (
+            raw_digit_str in allowed_numbers
+            or str(int(gen_claim.norm_val)) in allowed_numbers
+            or str(gen_claim.norm_val) in allowed_numbers
+        )
+
+        if matching_claims:
             context_match = False
             for pc in matching_claims:
                 if pc.unit == gen_claim.unit:
@@ -321,6 +429,16 @@ def verify_cover_letter_no_fabrication(
                 needs_review.append(
                     f"Cover letter metric '{gen_claim.raw_str}' context differs from master profile/job."
                 )
+        elif is_in_profile:
+            continue
+        elif not is_metric_claim(gen_claim):
+            needs_review.append(
+                f"Unverified bare number in cover letter: '{gen_claim.raw_str}' (needs human review)."
+            )
+        else:
+            hard_violations.append(
+                f"Invented numeric metric in cover letter: '{gen_claim.raw_str}'."
+            )
 
     is_valid = len(hard_violations) == 0
     return is_valid, hard_violations, needs_review
@@ -333,14 +451,16 @@ def generate_tailored_resume(
     profile: dict[str, Any],
 ) -> TailoredResumeResult:
     """Call OpenAI to generate a tailored resume variant from master profile."""
+    job = parse_db_row(job)
+    profile = parse_db_row(profile)
     user_prompt = (
         f"TARGET JOB DETAILS:\n"
         f"Title: {job.get('title')}\n"
         f"Company: {job.get('company')}\n"
-        f"Keywords: {json.dumps(job.get('keywords', []))}\n"
-        f"Requirements: {json.dumps(job.get('requirements', []))}\n\n"
+        f"Keywords: {json.dumps(job.get('keywords', []), default=str)}\n"
+        f"Requirements: {json.dumps(job.get('requirements', []), default=str)}\n\n"
         f"CANDIDATE MASTER PROFILE:\n"
-        f"{json.dumps(profile, indent=2)}\n"
+        f"{json.dumps(profile, indent=2, default=str)}\n"
     )
 
     resume_res = call_openai(
@@ -362,14 +482,16 @@ def generate_cover_letter(
     profile: dict[str, Any],
 ) -> CoverLetterResult:
     """Call OpenAI to generate a role-specific cover letter."""
+    job = parse_db_row(job)
+    profile = parse_db_row(profile)
     user_prompt = (
         f"TARGET JOB DETAILS:\n"
         f"Title: {job.get('title')}\n"
         f"Company: {job.get('company')}\n"
-        f"Keywords: {json.dumps(job.get('keywords', []))}\n"
-        f"Requirements: {json.dumps(job.get('requirements', []))}\n\n"
+        f"Keywords: {json.dumps(job.get('keywords', []), default=str)}\n"
+        f"Requirements: {json.dumps(job.get('requirements', []), default=str)}\n\n"
         f"CANDIDATE MASTER PROFILE:\n"
-        f"{json.dumps(profile, indent=2)}\n"
+        f"{json.dumps(profile, indent=2, default=str)}\n"
     )
 
     letter_res = call_openai(
@@ -409,11 +531,11 @@ async def persist_resume_variant(
             query,
             job_id,
             profile_id,
-            json.dumps(content),
+            json.dumps(content, default=str),
             file_path,
         )
 
-    return dict(row) if row else {}
+    return parse_db_row(row) if row else {}
 
 
 async def persist_cover_letter(
@@ -437,7 +559,7 @@ async def persist_cover_letter(
             content_text,
         )
 
-    return dict(row) if row else {}
+    return parse_db_row(row) if row else {}
 
 
 async def generate_and_persist_content(
@@ -448,6 +570,8 @@ async def generate_and_persist_content(
     pool: asyncpg.Pool | None = None,
 ) -> dict[str, Any]:
     """Orchestrate Phase 2 content generation and optional Postgres persistence."""
+    job = parse_db_row(job)
+    profile = parse_db_row(profile)
     resume_res = generate_tailored_resume(job, profile)
     letter_res = generate_cover_letter(job, profile)
 

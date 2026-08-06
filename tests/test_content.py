@@ -225,9 +225,34 @@ class TestCoverLetterVerification:
         )
 
         is_valid, hard_violations, _ = verify_cover_letter_no_fabrication(cover_res, master_profile, job)
-
         assert is_valid
         assert len(hard_violations) == 0
+
+    def test_cover_letter_phone_number_does_not_fail(self, master_profile: dict) -> None:
+        """Cover letter containing candidate's real phone number (+1-555-0199) must NOT trigger fabrication errors."""
+        job = {"title": "Senior Backend Engineer", "company": "Acme Corp", "requirements": []}
+        cover_res = CoverLetterResult(
+            cover_letter="Dear Hiring Manager,\n\nI am excited to apply.\n\nSincerely,\nAlex Johnson\n+1-555-0199\nalex@example.com",
+            company_referenced="Acme Corp",
+            title_referenced="Senior Backend Engineer",
+        )
+
+        is_valid, hard_violations, _ = verify_cover_letter_no_fabrication(cover_res, master_profile, job)
+        assert is_valid
+        assert len(hard_violations) == 0
+
+    def test_cover_letter_invented_300_percent_growth_hard_fails(self, master_profile: dict) -> None:
+        """An actually-invented metric like 300% growth not in profile must hard-fail."""
+        job = {"title": "Senior Backend Engineer", "company": "Acme Corp", "requirements": []}
+        cover_res = CoverLetterResult(
+            cover_letter="I achieved 300% revenue growth in my previous engineering role.",
+            company_referenced="Acme Corp",
+            title_referenced="Senior Backend Engineer",
+        )
+
+        is_valid, hard_violations, _ = verify_cover_letter_no_fabrication(cover_res, master_profile, job)
+        assert not is_valid
+        assert any("300%" in v for v in hard_violations)
 
 
 # --- 4. Agent Function & Persistence Tests (Mocked) ----------------------
@@ -401,3 +426,125 @@ class TestAgentGenerationAndPersistence:
 
         assert res["id"] == "44444444-4444-4444-4444-444444444444"
         mock_conn.fetchrow.assert_called_once()
+
+    @patch("src.agents.content.call_openai")
+    def test_content_generation_handles_asyncpg_stringified_jsonb_profile_row(self, mock_openai) -> None:
+        """Content agent must handle raw DB profile row whose JSONB fields are JSON strings without raising TypeError."""
+        mock_openai.side_effect = [
+            TailoredResumeResult(
+                summary="Tailored backend engineer",
+                experience=[
+                    TailoredExperienceEntry(
+                        company="Acme Corp",
+                        title="Senior Engineer",
+                        dates="2020 - Present",
+                        bullets=["Built distributed backend systems."],
+                    )
+                ],
+                education=[
+                    TailoredEducationEntry(
+                        institution="UC Berkeley",
+                        degree="BS CS",
+                        year="2020",
+                    )
+                ],
+                skills=["Python", "Postgres"],
+                needs_review=[],
+            ),
+            CoverLetterResult(
+                cover_letter="Dear Hiring Manager,\n\nI am excited to apply for Senior Backend Engineer.",
+                company_referenced="Acme Corp",
+                title_referenced="Senior Engineer",
+                needs_review=[],
+            ),
+        ]
+
+        # Simulating raw row dict as returned by asyncpg when jsonb columns are stringified
+        raw_stringified_profile_row = {
+            "id": "119880c3-5d57-4465-a11b-338a33059409",
+            "full_name": "Test Candidate",
+            "email": "test@example.com",
+            "summary": "Experienced engineer.",
+            "experience": json.dumps([{"company": "Acme Corp", "title": "Senior Engineer", "bullets": ["Built backend systems."]}]),
+            "education": json.dumps([{"institution": "UC Berkeley", "degree": "BS CS"}]),
+            "skills": json.dumps(["Python", "Postgres"]),
+            "certifications": json.dumps(["AWS Certified"]),
+            "links": json.dumps({"github": "https://github.com/test"}),
+        }
+
+        job = {
+            "id": "25bee091-c44f-43b4-824d-fe107866a317",
+            "title": "Senior Engineer",
+            "company": "Acme Corp",
+            "keywords": json.dumps(["Python", "Postgres"]),
+            "requirements": json.dumps(["5+ years experience"]),
+        }
+
+        # Must parse cleanly without raising TypeError: string indices must be integers, not 'str'
+        res = generate_tailored_resume(job, raw_stringified_profile_row)
+        assert res.summary == "Tailored backend engineer"
+        assert res.experience[0].company == "Acme Corp"
+
+    @patch("src.agents.content.call_openai")
+    def test_generate_tailored_resume_handles_uuid_and_datetime_objects(
+        self, mock_call_openai: MagicMock
+    ) -> None:
+        """generate_tailored_resume must handle profile/job dicts containing raw UUID and datetime objects without raising TypeError."""
+        from datetime import datetime, timezone
+        from uuid import uuid4
+
+        mock_call_openai.return_value = TailoredResumeResult(
+            summary="Tailored backend engineer",
+            experience=[
+                TailoredExperienceEntry(
+                    company="Acme Corp",
+                    title="Senior Engineer",
+                    dates="2020-2022",
+                    bullets=["Built systems."],
+                )
+            ],
+            education=[
+                TailoredEducationEntry(
+                    institution="UC Berkeley",
+                    degree="BS CS",
+                    year="2020",
+                )
+            ],
+            skills=["Python", "Postgres"],
+            needs_review=[],
+        )
+
+        uuid_profile_id = uuid4()
+        uuid_job_id = uuid4()
+        now_dt = datetime.now(timezone.utc)
+
+        raw_profile_with_uuid_dt = {
+            "id": uuid_profile_id,
+            "created_at": now_dt,
+            "full_name": "UUID Candidate",
+            "email": "uuid@example.com",
+            "summary": "Experienced engineer with raw UUID & datetime.",
+            "experience": [{"company": "Acme Corp", "title": "Senior Engineer", "bullets": ["Built systems."]}],
+            "education": [{"institution": "UC Berkeley", "degree": "BS CS"}],
+            "skills": ["Python", "Postgres"],
+            "certifications": [],
+            "links": {},
+        }
+
+        raw_job_with_uuid_dt = {
+            "id": uuid_job_id,
+            "created_at": now_dt,
+            "title": "Senior Engineer",
+            "company": "Acme Corp",
+            "keywords": ["Python", "Postgres"],
+            "requirements": ["5+ years experience"],
+        }
+
+        res = generate_tailored_resume(raw_job_with_uuid_dt, raw_profile_with_uuid_dt)
+        assert res.summary == "Tailored backend engineer"
+        # Confirm prompt generated and passed to call_openai
+        call_args = mock_call_openai.call_args
+        user_prompt = call_args.kwargs["user_message"]
+        assert str(uuid_profile_id) in user_prompt
+        assert str(uuid_job_id) not in user_prompt  # job details block
+        assert "UUID Candidate" in user_prompt

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 import asyncpg
 from pydantic import BaseModel, Field
 
+from src.db import parse_db_row
 from src.llm.openai_client import call_openai
 from src.services.playwright_service import (
     GreenhouseParseError,
@@ -237,13 +238,13 @@ async def persist_job(job_dict: dict[str, Any], pool: asyncpg.Pool) -> dict[str,
             job_dict["company"],
             job_dict.get("location"),
             job_dict["raw_jd"],
-            json.dumps(job_dict["requirements"]),
-            json.dumps(job_dict["keywords"]),
+            json.dumps(job_dict["requirements"], default=str),
+            json.dumps(job_dict["keywords"], default=str),
             job_dict["fit_score"],
             job_dict["status"],
         )
 
-    return dict(row) if row else job_dict
+    return parse_db_row(row) if row else job_dict
 
 
 async def analyze_job(
@@ -254,17 +255,8 @@ async def analyze_job(
     fit_threshold: float = 60.0,
     settings: Settings | None = None,
 ) -> dict[str, Any]:
-    """Orchestrate the Discovery and Analysis Agent flow for a job page.
-
-    Steps:
-    1. Fetch HTML via Playwright service if html_content is not provided.
-    2. Fetch candidate profile from DB or fixture if profile is not provided.
-    3. Parse HTML (pure). On parse failure, return manual-review outcome without calling LLM or DB.
-    4. Analyze JD via OpenAI.
-    5. Score fit against candidate profile.
-    6. Determine job status ('qualified' if fit_score >= threshold, else 'disqualified').
-    7. Persist job row in Postgres if pool is provided.
-    """
+    """Execute complete Phase 1 Discovery and Analysis pipeline for a job URL."""
+    # 1. HTML Fetching
     if html_content is None:
         if settings is None:
             from src.config import Settings
@@ -279,9 +271,7 @@ async def analyze_job(
             async with pool.acquire() as conn:
                 prof_row = await conn.fetchrow("SELECT * FROM profiles ORDER BY created_at DESC LIMIT 1;")
                 if prof_row:
-                    profile = dict(prof_row)
-                    if isinstance(profile.get("links"), str):
-                        profile["links"] = json.loads(profile["links"])
+                    profile = parse_db_row(prof_row)
         if profile is None:
             master_path = Path("fixtures/master_profile.json")
             if master_path.exists():

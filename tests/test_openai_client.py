@@ -170,4 +170,22 @@ class TestCallOpenAI:
 
         call_args = mock_client.chat.completions.create.call_args
         assert call_args.kwargs["response_format"] == {"type": "json_object"}
-        assert call_args.kwargs["model"] == "gpt-4.1"
+        assert call_args.kwargs["model"] == "gpt-4o"
+
+    @patch("src.llm.openai_client.OpenAI")
+    def test_custom_model_parameter(self, mock_openai_cls: MagicMock) -> None:
+        """call_openai should respect explicitly passed model parameter."""
+        payload = {"title": "Test", "score": 50.0, "keywords": []}
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = self._mock_response(payload)
+        mock_openai_cls.return_value = mock_client
+
+        call_openai(
+            prompt_name="discovery_analyze",
+            user_message="Text.",
+            response_model=SampleResponse,
+            model="gpt-4o-mini",
+        )
+
+        call_args = mock_client.chat.completions.create.call_args
+        assert call_args.kwargs["model"] == "gpt-4o-mini"

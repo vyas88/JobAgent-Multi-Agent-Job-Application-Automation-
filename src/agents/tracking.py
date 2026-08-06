@@ -16,6 +16,7 @@ from typing import Any
 
 import asyncpg
 
+from src.db import parse_db_row
 from src.exceptions import NotFoundError
 from src.services.calendar_service import GoogleCalendarClientProtocol
 
@@ -68,7 +69,7 @@ async def _execute_status_update(
     if old_status == new_status:
         full_query = "SELECT id, job_id, resume_variant_id, cover_letter_id, status, review_artifact, approved_at, submitted_at, created_at, updated_at FROM applications WHERE id = $1::uuid;"
         app_row = await conn.fetchrow(full_query, application_id)
-        return dict(app_row)
+        return parse_db_row(app_row)
 
     # 3. Update applications status
     update_query = """
@@ -87,7 +88,7 @@ async def _execute_status_update(
     """
     await conn.execute(audit_query, application_id, old_status, new_status, reason)
 
-    return dict(updated_app_row)
+    return parse_db_row(updated_app_row)
 
 
 async def update_status(

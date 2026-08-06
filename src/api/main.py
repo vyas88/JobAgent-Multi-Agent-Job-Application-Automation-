@@ -34,6 +34,7 @@ from src.api.models import (
     UpdateStatusResponse,
 )
 from src.config import Settings
+from src.db import parse_db_row
 from src.exceptions import ForbiddenStatusTransitionError, NotFoundError
 from src.services.calendar_service import GoogleCalendarClient, GoogleCalendarClientProtocol
 from src.services.playwright_service import GreenhouseParseError
@@ -194,8 +195,8 @@ async def generate_content_endpoint(
     res = await content.generate_and_persist_content(
         job_id=str(req.job_id),
         profile_id=str(req.profile_id),
-        job=dict(job_row),
-        profile=dict(profile_row),
+        job=parse_db_row(job_row),
+        profile=parse_db_row(profile_row),
         pool=pool,
     )
     return res
@@ -235,17 +236,14 @@ async def prefill_application_endpoint(
         profile_id=str(req.profile_id),
         resume_variant_id=str(req.resume_variant_id),
         cover_letter_id=str(req.cover_letter_id) if req.cover_letter_id else None,
-        profile=dict(profile_row),
-        job=dict(job_row),
-        resume_variant=dict(res_row),
-        cover_letter=dict(cl_row) if cl_row else None,
+        profile=parse_db_row(profile_row),
+        job=parse_db_row(job_row),
+        resume_variant=parse_db_row(res_row),
+        cover_letter=parse_db_row(cl_row) if cl_row else None,
         pool=pool,
         page_or_url=req.page_or_url,
     )
-    res_dict = dict(res)
-    if isinstance(res_dict.get("review_artifact"), str):
-        res_dict["review_artifact"] = json.loads(res_dict["review_artifact"])
-    return res_dict
+    return parse_db_row(res)
 
 
 @app.post(
@@ -261,26 +259,27 @@ async def approve_application_endpoint(
     """Explicit human approval endpoint: transitions status ONLY from 'pending_review' -> 'approved'."""
     app_str = str(application_id)
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT status FROM applications WHERE id = $1::uuid;", app_str)
-        if not row:
-            raise NotFoundError(f"Application {app_str} not found.")
+        async with conn.transaction():
+            row = await conn.fetchrow("SELECT status FROM applications WHERE id = $1::uuid;", app_str)
+            if not row:
+                raise NotFoundError(f"Application {app_str} not found.")
 
-        curr_status = row["status"]
-        if curr_status != "pending_review":
-            raise ApprovalError(
-                f"Application {app_str} is in status '{curr_status}', not 'pending_review'. Approval refused."
+            curr_status = row["status"]
+            if curr_status != "pending_review":
+                raise ApprovalError(
+                    f"Application {app_str} is in status '{curr_status}', not 'pending_review'. Approval refused."
+                )
+
+            # Transition status to approved
+            updated_app = await tracking.update_status(
+                application_id=app_str,
+                new_status="approved",
+                pool=pool,
+                reason=req.reason or "Human approved via API",
+                conn=conn,
             )
-
-        # Transition status to approved
-        updated_app = await tracking.update_status(
-            application_id=app_str,
-            new_status="approved",
-            pool=pool,
-            reason=req.reason or "Human approved via API",
-            conn=conn,
-        )
-        # Set approved_at timestamp
-        await conn.execute("UPDATE applications SET approved_at = now() WHERE id = $1::uuid;", app_str)
+            # Set approved_at timestamp
+            await conn.execute("UPDATE applications SET approved_at = now() WHERE id = $1::uuid;", app_str)
 
     return updated_app
 
@@ -375,10 +374,9 @@ async def get_application_endpoint(
             app_str,
         )
 
-    app_dict = dict(app_row)
-    app_dict["review_artifact"] = json.loads(app_dict["review_artifact"]) if isinstance(app_dict["review_artifact"], str) else app_dict["review_artifact"]
-    app_dict["status_history"] = [dict(r) for r in hist_rows]
-    app_dict["interviews"] = [dict(r) for r in int_rows]
+    app_dict = parse_db_row(app_row)
+    app_dict["status_history"] = [parse_db_row(r) for r in hist_rows]
+    app_dict["interviews"] = [parse_db_row(r) for r in int_rows]
     return app_dict
 
 
@@ -397,7 +395,4 @@ async def get_job_endpoint(
         if not job_row:
             raise NotFoundError(f"Job {job_str} not found.")
 
-    job_dict = dict(job_row)
-    job_dict["requirements"] = json.loads(job_dict["requirements"]) if isinstance(job_dict["requirements"], str) else job_dict["requirements"]
-    job_dict["keywords"] = json.loads(job_dict["keywords"]) if isinstance(job_dict["keywords"], str) else job_dict["keywords"]
-    return job_dict
+    return parse_db_row(job_row)

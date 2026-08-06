@@ -24,6 +24,7 @@ from src.services.playwright_service import (
     submit_greenhouse_form,
 )
 
+from src.db import parse_db_row
 from src.exceptions import NotFoundError
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,13 @@ async def prefill_application(
 
     STOPS BEFORE SUBMIT BUTTON.
     """
+    # Parse all inputs to ensure JSONB fields are lists/dicts
+    profile = parse_db_row(profile)
+    job = parse_db_row(job)
+    resume_variant = parse_db_row(resume_variant)
+    if cover_letter:
+        cover_letter = parse_db_row(cover_letter)
+
     # 1. Resolve physical resume file path
     resume_content = resume_variant.get("content", {})
     file_path = resume_variant.get("file_path")
@@ -157,9 +165,9 @@ async def prefill_application(
                 job_id,
                 resume_variant_id,
                 cover_letter_id,
-                json.dumps(review_artifact),
+                json.dumps(review_artifact, default=str),
             )
-            return dict(row) if row else app_data
+            return parse_db_row(row) if row else app_data
 
     return app_data
 
@@ -191,6 +199,14 @@ async def submit_application(
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(claim_query, application_id)
+        if row:
+            await conn.execute(
+                """
+                INSERT INTO status_history (application_id, old_status, new_status, reason)
+                VALUES ($1::uuid, 'approved'::application_status, 'submitted'::application_status, 'Application submitted');
+                """,
+                application_id,
+            )
 
     if not row:
         # Refused: Check current status for precise error messaging / idempotency

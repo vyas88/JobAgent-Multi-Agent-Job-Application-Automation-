@@ -60,7 +60,14 @@ async def test_playwright_submit_application_live_db(tmp_path: Path) -> None:
     profile_data = json.loads(Path("fixtures/master_profile.json").read_text(encoding="utf-8"))
     pool = await asyncpg.create_pool(settings.database_url)
 
-    test_source_url = f"https://boards.greenhouse.io/testco/jobs/{hash(file_url) & 0xFFFFFF}"
+    from uuid import uuid4
+    profile_email = f"app.test.{uuid4()}@example.com"
+    test_source_url = f"https://boards.greenhouse.io/testco/jobs/{uuid4()}"
+
+    profile_id = None
+    job_id = None
+    resume_variant_id = None
+    app_id = None
 
     try:
         async with pool.acquire() as conn:
@@ -72,7 +79,7 @@ async def test_playwright_submit_application_live_db(tmp_path: Path) -> None:
                 RETURNING id;
                 """,
                 profile_data["full_name"],
-                profile_data["email"],
+                profile_email,
                 profile_data["phone"],
                 json.dumps(profile_data["links"]),
             )
@@ -143,12 +150,15 @@ async def test_playwright_submit_application_live_db(tmp_path: Path) -> None:
             assert check_row["submitted_at"] is not None
 
     finally:
-        # Clean up test rows
+        # Clean up ONLY test rows created by this specific test run using exact UUIDs
         async with pool.acquire() as conn:
-            await conn.execute("DELETE FROM status_history WHERE application_id IN (SELECT id FROM applications WHERE job_id IN (SELECT id FROM jobs WHERE source_url = $1));", test_source_url)
-            await conn.execute("DELETE FROM applications WHERE job_id IN (SELECT id FROM jobs WHERE source_url = $1);", test_source_url)
-            await conn.execute("DELETE FROM resume_variants WHERE job_id IN (SELECT id FROM jobs WHERE source_url = $1);", test_source_url)
-            await conn.execute("DELETE FROM jobs WHERE source_url = $1;", test_source_url)
-            await conn.execute("DELETE FROM profiles WHERE email = $1;", profile_data["email"])
+            if app_id:
+                await conn.execute("DELETE FROM status_history WHERE application_id = $1::uuid;", app_id)
+                await conn.execute("DELETE FROM applications WHERE id = $1::uuid;", app_id)
+            if job_id:
+                await conn.execute("DELETE FROM resume_variants WHERE job_id = $1::uuid;", job_id)
+                await conn.execute("DELETE FROM jobs WHERE id = $1::uuid;", job_id)
+            if profile_id:
+                await conn.execute("DELETE FROM profiles WHERE id = $1::uuid;", profile_id)
 
         await pool.close()

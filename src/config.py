@@ -37,6 +37,7 @@ class Settings:
 
     database_url: str
     openai_api_key: str
+    openai_model: str = "gpt-4o"
     playwright_service_url: str = "http://localhost:8000"
     api_key: str = "dev-api-key"
     google_client_id: str | None = None
@@ -50,6 +51,7 @@ class Settings:
         return cls(
             database_url=_require_env("DATABASE_URL"),
             openai_api_key=_require_env("OPENAI_API_KEY"),
+            openai_model=os.environ.get("OPENAI_MODEL", "gpt-4o"),
             playwright_service_url=os.environ.get(
                 "PLAYWRIGHT_SERVICE_URL", "http://localhost:8000"
             ),

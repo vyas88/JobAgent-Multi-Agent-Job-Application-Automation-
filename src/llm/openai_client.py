@@ -61,7 +61,7 @@ def call_openai(
     user_message: str,
     response_model: type[T],
     *,
-    model: str = "gpt-4.1",
+    model: str | None = None,
     temperature: float = 0.2,
     settings: Settings | None = None,
 ) -> T:
@@ -76,7 +76,7 @@ def call_openai(
     response_model:
         A Pydantic model class that the JSON response will be parsed into.
     model:
-        OpenAI model identifier. Default ``gpt-4.1``.
+        OpenAI model identifier. Default reads from Settings (OPENAI_MODEL or ``gpt-4o``).
     temperature:
         Sampling temperature; keep low for deterministic structured output.
     settings:
@@ -94,11 +94,12 @@ def call_openai(
     if settings is None:
         settings = Settings.load()
 
+    target_model = model or settings.openai_model
     client = OpenAI(api_key=settings.openai_api_key)
     system_prompt = load_prompt(prompt_name)
 
     response = client.chat.completions.create(
-        model=model,
+        model=target_model,
         temperature=temperature,
         response_format={"type": "json_object"},
         messages=[

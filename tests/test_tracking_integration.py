@@ -34,15 +34,22 @@ async def test_tracking_live_neon_db_status_update_and_interview() -> None:
     cal_client = MockCalendarClient(event_id="evt_neon_integration_123")
     scheduled_time = datetime(2026, 8, 15, 10, 0, tzinfo=timezone.utc)
 
+    profile_email = f"tracking.test.{uuid4()}@example.com"
+
+    profile_id = None
+    job_id = None
+    app_id = None
+
     try:
         async with pool.acquire() as conn:
             # 1. Insert Profile
             prof_row = await conn.fetchrow(
                 """
                 INSERT INTO profiles (full_name, email)
-                VALUES ('Tracking Test User', 'tracking.test@example.com')
+                VALUES ('Tracking Test User', $1)
                 RETURNING id;
-                """
+                """,
+                profile_email,
             )
             profile_id = prof_row["id"]
 
@@ -120,12 +127,15 @@ async def test_tracking_live_neon_db_status_update_and_interview() -> None:
             assert hist_rows_after[1]["reason"] == "Interview scheduled"
 
     finally:
-        # Clean up test rows in Neon DB
+        # Clean up ONLY test rows created by this specific test run using exact UUIDs
         async with pool.acquire() as conn:
-            await conn.execute("DELETE FROM interviews WHERE application_id IN (SELECT id FROM applications WHERE job_id IN (SELECT id FROM jobs WHERE source_url = $1));", test_url)
-            await conn.execute("DELETE FROM status_history WHERE application_id IN (SELECT id FROM applications WHERE job_id IN (SELECT id FROM jobs WHERE source_url = $1));", test_url)
-            await conn.execute("DELETE FROM applications WHERE job_id IN (SELECT id FROM jobs WHERE source_url = $1);", test_url)
-            await conn.execute("DELETE FROM jobs WHERE source_url = $1;", test_url)
-            await conn.execute("DELETE FROM profiles WHERE email = 'tracking.test@example.com';")
+            if app_id:
+                await conn.execute("DELETE FROM interviews WHERE application_id = $1::uuid;", app_id)
+                await conn.execute("DELETE FROM status_history WHERE application_id = $1::uuid;", app_id)
+                await conn.execute("DELETE FROM applications WHERE id = $1::uuid;", app_id)
+            if job_id:
+                await conn.execute("DELETE FROM jobs WHERE id = $1::uuid;", job_id)
+            if profile_id:
+                await conn.execute("DELETE FROM profiles WHERE id = $1::uuid;", profile_id)
 
         await pool.close()
