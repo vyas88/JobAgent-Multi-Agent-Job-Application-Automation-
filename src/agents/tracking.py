@@ -16,6 +16,7 @@ from typing import Any
 
 import asyncpg
 
+from src.exceptions import NotFoundError
 from src.services.calendar_service import GoogleCalendarClientProtocol
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ async def _execute_status_update(
     read_query = "SELECT status FROM applications WHERE id = $1::uuid FOR UPDATE;"
     row = await conn.fetchrow(read_query, application_id)
     if not row:
-        raise ValueError(f"Application {application_id} not found.")
+        raise NotFoundError(f"Application {application_id} not found.")
 
     old_status = row["status"]
 
@@ -137,7 +138,7 @@ async def schedule_interview(
         app_info = await conn.fetchrow(query_info, application_id)
 
     if not app_info:
-        raise ValueError(f"Application {application_id} not found.")
+        raise NotFoundError(f"Application {application_id} not found.")
 
     title = app_info["title"]
     company = app_info["company"]

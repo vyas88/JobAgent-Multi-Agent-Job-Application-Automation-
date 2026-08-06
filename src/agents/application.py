@@ -24,6 +24,8 @@ from src.services.playwright_service import (
     submit_greenhouse_form,
 )
 
+from src.exceptions import NotFoundError
+
 logger = logging.getLogger(__name__)
 
 
@@ -196,7 +198,7 @@ async def submit_application(
             current_row = await conn.fetchrow("SELECT status FROM applications WHERE id = $1::uuid;", application_id)
 
         if not current_row:
-            raise ValueError(f"Application {application_id} not found.")
+            raise NotFoundError(f"Application {application_id} not found.")
 
         curr_status = current_row["status"]
         if curr_status == "submitted":

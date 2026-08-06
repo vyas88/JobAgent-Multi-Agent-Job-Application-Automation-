@@ -7,6 +7,7 @@ This module provides HTML parsing, form mapping, and Playwright browser actions.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -116,6 +117,10 @@ def map_greenhouse_fields(
     email = profile.get("email", "")
     phone = profile.get("phone", "")
     links = profile.get("links", {})
+    if isinstance(links, str):
+        links = json.loads(links) if links else {}
+    elif not isinstance(links, dict):
+        links = {}
 
     # Helper to check if required
     def is_required(el: Any) -> bool:
