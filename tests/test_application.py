@@ -231,14 +231,16 @@ class TestApprovalGateEnforcement:
             "cover_letter_id": None,
             "status": "submitted",
             "review_artifact": {},
+            "submitted_at": "2026-08-07T02:53:23Z",
         }
 
         res = await submit_application("app-uuid-approved", pool=mock_pool, skip_browser=True)
 
         assert res["id"] == "app-uuid-approved"
         assert res["status"] == "submitted"
-        # Audit entry executed
-        assert mock_conn.execute.called
+        assert res["submitted_at"] is not None
+        # Audit entry executed exactly once (no duplicate status_history rows)
+        assert mock_conn.execute.call_count == 1
 
     @pytest.mark.asyncio
     @patch("src.agents.application.submit_greenhouse_form")

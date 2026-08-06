@@ -196,19 +196,11 @@ async def submit_application(
             approved_at = COALESCE(approved_at, now()),
             updated_at = now()
         WHERE id = $1::uuid AND status = 'approved'::application_status
-        RETURNING id, job_id, resume_variant_id, cover_letter_id, status, review_artifact;
+        RETURNING id, job_id, resume_variant_id, cover_letter_id, status, review_artifact, submitted_at, approved_at, created_at, updated_at;
     """
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(claim_query, application_id)
-        if row:
-            await conn.execute(
-                """
-                INSERT INTO status_history (application_id, old_status, new_status, reason)
-                VALUES ($1::uuid, 'approved'::application_status, 'submitted'::application_status, 'Application submitted');
-                """,
-                application_id,
-            )
 
     if not row:
         # Refused: Check current status for precise error messaging / idempotency
@@ -226,7 +218,7 @@ async def submit_application(
             f"Application {application_id} is in status '{curr_status}', not 'approved'. Submission refused."
         )
 
-    claimed_app = dict(row)
+    claimed_app = parse_db_row(row)
 
     # 2. Browser Execution
     if not skip_browser and page_or_url:
@@ -260,6 +252,6 @@ async def submit_application(
         VALUES ($1::uuid, 'approved'::application_status, 'submitted'::application_status, $2);
     """
     async with pool.acquire() as conn:
-        await conn.execute(audit_query, application_id, "User approved submission")
+        await conn.execute(audit_query, application_id, "Application submitted")
 
     return claimed_app

@@ -142,12 +142,20 @@ async def test_playwright_submit_application_live_db(tmp_path: Path) -> None:
         )
 
         assert sub_res["status"] == "submitted"
+        assert sub_res["submitted_at"] is not None
 
         # Verify DB state
         async with pool.acquire() as conn:
             check_row = await conn.fetchrow("SELECT status, submitted_at FROM applications WHERE id = $1::uuid;", app_id)
             assert check_row["status"] == "submitted"
             assert check_row["submitted_at"] is not None
+
+            # Verify status_history contains EXACTLY ONE approved -> submitted transition row
+            history_rows = await conn.fetch(
+                "SELECT old_status, new_status, reason FROM status_history WHERE application_id = $1::uuid AND old_status = 'approved' AND new_status = 'submitted';",
+                app_id,
+            )
+            assert len(history_rows) == 1
 
     finally:
         # Clean up ONLY test rows created by this specific test run using exact UUIDs
