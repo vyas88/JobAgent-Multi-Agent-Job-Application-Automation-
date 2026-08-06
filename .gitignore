@@ -24,10 +24,11 @@ env/
 .coverage
 htmlcov/
 
-# Playwright
+# Playwright & Generated Artifacts
 playwright-report/
 test-results/
 .playwright/
+artifacts/
 
 # Node (any n8n custom nodes or tooling)
 node_modules/
