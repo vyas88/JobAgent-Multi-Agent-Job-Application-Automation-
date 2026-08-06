@@ -38,6 +38,10 @@ class Settings:
     database_url: str
     openai_api_key: str
     playwright_service_url: str = "http://localhost:8000"
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    google_redirect_uri: str | None = None
+    google_refresh_token: str | None = None
 
     @classmethod
     def load(cls) -> Settings:
@@ -48,4 +52,8 @@ class Settings:
             playwright_service_url=os.environ.get(
                 "PLAYWRIGHT_SERVICE_URL", "http://localhost:8000"
             ),
+            google_client_id=os.environ.get("GOOGLE_CLIENT_ID"),
+            google_client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
+            google_redirect_uri=os.environ.get("GOOGLE_REDIRECT_URI"),
+            google_refresh_token=os.environ.get("GOOGLE_REFRESH_TOKEN"),
         )
