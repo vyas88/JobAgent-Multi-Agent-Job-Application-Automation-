@@ -1,18 +1,24 @@
 """Shared pytest fixtures.
 
 These fixtures provide common test data and environment patching so that
-no test ever requires real credentials or live services.
+unit tests never require real credentials or live services, while integration
+tests can access the real DATABASE_URL from .env when explicitly invoked.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
+from dotenv import load_dotenv
 
 # Path to the fixtures/ directory at repo root.
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
+
+# Load .env once at fixture loading time
+load_dotenv()
 
 
 @pytest.fixture()
@@ -30,12 +36,19 @@ def greenhouse_page_html() -> str:
 
 
 @pytest.fixture(autouse=True)
-def _patch_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Set dummy environment variables for every test.
+def _patch_env(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set environment variables for tests.
 
-    This ensures no test accidentally uses real credentials and that
-    config.Settings.load() always succeeds in tests.
+    For unit tests: patches dummy variables so no live calls/credentials are made.
+    For integration tests (@pytest.mark.integration): preserves the real DATABASE_URL.
     """
-    monkeypatch.setenv("DATABASE_URL", "postgresql://test:test@localhost:5432/jobagent_test")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-a-real-key")
-    monkeypatch.setenv("PLAYWRIGHT_SERVICE_URL", "http://localhost:8000")
+    if request.node.get_closest_marker("integration"):
+        real_db = os.environ.get("DATABASE_URL")
+        if real_db:
+            monkeypatch.setenv("DATABASE_URL", real_db)
+        monkeypatch.setenv("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY", "sk-test-not-a-real-key"))
+        monkeypatch.setenv("PLAYWRIGHT_SERVICE_URL", "http://localhost:8000")
+    else:
+        monkeypatch.setenv("DATABASE_URL", "postgresql://test:test@localhost:5432/jobagent_test")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-a-real-key")
+        monkeypatch.setenv("PLAYWRIGHT_SERVICE_URL", "http://localhost:8000")
