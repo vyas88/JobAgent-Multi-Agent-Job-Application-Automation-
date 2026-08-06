@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -114,13 +115,14 @@ async def prefill_application(
     target_url = page_or_url or job.get("source_url", "")
 
     # 2. Perform Pre-fill or Pure Fixture Mapping
+    prefilled_at_ts = datetime.now(timezone.utc).isoformat()
     if skip_browser or not target_url.startswith(("http://", "https://", "file://")):
         # Pure HTML mapping mode for unit tests
         html_content = target_url if target_url and len(target_url) > 100 else "<form></form>"
         mapping = map_greenhouse_fields(html_content, profile, file_path, cover_letter_text)
         review_artifact = {
             "screenshot_path": "artifacts/screenshots/fixture_prefill.png",
-            "prefilled_at": "2026-08-06T14:10:00Z",
+            "prefilled_at": prefilled_at_ts,
             "field_map": mapping.field_map,
             "unanswered_questions": mapping.unanswered_questions,
             "manual_completion_required": mapping.captcha_detected or mapping.missing_required_fields or len(mapping.unanswered_questions) > 0,
@@ -131,7 +133,7 @@ async def prefill_application(
         prefill_res = await prefill_greenhouse_form(target_url, profile, file_path, cover_letter_text)
         review_artifact = {
             "screenshot_path": prefill_res["screenshot_path"],
-            "prefilled_at": "2026-08-06T14:10:00Z",
+            "prefilled_at": prefilled_at_ts,
             "field_map": prefill_res["field_map"],
             "unanswered_questions": prefill_res["unanswered_questions"],
             "manual_completion_required": prefill_res["manual_completion_required"],

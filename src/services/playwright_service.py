@@ -8,6 +8,7 @@ This module provides HTML parsing, form mapping, and Playwright browser actions.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -105,6 +106,7 @@ def map_greenhouse_fields(
     soup = BeautifulSoup(html, "html.parser")
     field_map: dict[str, dict[str, Any]] = {}
     unanswered_questions: list[str] = []
+    mapped_ids: set[str] = set()
 
     # Check CAPTCHA
     captcha_elements = soup.select("iframe[src*='recaptcha'], iframe[src*='hcaptcha'], .g-recaptcha, .h-captcha")
@@ -118,79 +120,135 @@ def map_greenhouse_fields(
     phone = profile.get("phone", "")
     links = profile.get("links", {})
     if isinstance(links, str):
-        links = json.loads(links) if links else {}
+        try:
+            links = json.loads(links) if links else {}
+        except Exception:
+            links = {}
     elif not isinstance(links, dict):
         links = {}
 
-    # Helper to check if required
-    def is_required(el: Any) -> bool:
-        return el.get("aria-required") == "true" or el.has_attr("required") or "aria-required" in el.attrs
+    def is_required(el: Any, wrapper: Any = None) -> bool:
+        if el.get("aria-required") == "true" or el.has_attr("required") or "aria-required" in el.attrs:
+            return True
+        if wrapper:
+            if wrapper.select_one("[aria-required='true'], [required]"):
+                return True
+            lbl = wrapper.select_one("label, .label")
+            if lbl and ("*" in lbl.get_text() or "required" in lbl.get_text().lower()):
+                return True
+            for star in wrapper.select("span, font, p, div"):
+                if "*" in star.get_text():
+                    return True
+        return False
 
-    # Map standard fields
-    # First Name
-    if fn_el := soup.select_one("#first_name, input[name*='first_name']"):
-        selector = f"#{fn_el.get('id')}" if fn_el.get("id") else "input[name*='first_name']"
-        field_map[selector] = {"value": first_name, "type": "text", "required": is_required(fn_el), "status": "filled"}
+    def get_clean_label(el: Any, wrapper: Any = None) -> str:
+        el_id = el.get("id", "")
+        label_text = ""
+        if el_id:
+            lbl = soup.select_one(f'label[for="{el_id}"], [id="{el_id}-label"]')
+            if lbl:
+                label_text = lbl.get_text(strip=True)
+        if not label_text and wrapper:
+            lbl = wrapper.select_one("label, .label, legend")
+            if lbl:
+                label_text = lbl.get_text(strip=True)
+        if not label_text:
+            label_text = el.get("aria-label") or el.get("placeholder") or ""
 
-    # Last Name
-    if ln_el := soup.select_one("#last_name, input[name*='last_name']"):
-        selector = f"#{ln_el.get('id')}" if ln_el.get("id") else "input[name*='last_name']"
-        field_map[selector] = {"value": last_name, "type": "text", "required": is_required(ln_el), "status": "filled"}
-
-    # Email
-    if em_el := soup.select_one("#email, input[name*='email']"):
-        selector = f"#{em_el.get('id')}" if em_el.get("id") else "input[name*='email']"
-        field_map[selector] = {"value": email, "type": "text", "required": is_required(em_el), "status": "filled"}
-
-    # Phone
-    if ph_el := soup.select_one("#phone, input[name*='phone']"):
-        selector = f"#{ph_el.get('id')}" if ph_el.get("id") else "input[name*='phone']"
-        field_map[selector] = {"value": phone, "type": "text", "required": is_required(ph_el), "status": "filled"}
-
-    # Resume File
-    if res_el := soup.select_one("#resume, input[type='file'][name*='resume']"):
-        selector = f"#{res_el.get('id')}" if res_el.get("id") else "input[type='file'][name*='resume']"
-        field_map[selector] = {"value": resume_path or "", "type": "file", "required": is_required(res_el), "status": "uploaded" if resume_path else "missing"}
-
-    # Cover Letter Text
-    if cl_el := soup.select_one("#cover_letter_text, textarea[name*='cover_letter']"):
-        selector = f"#{cl_el.get('id')}" if cl_el.get("id") else "textarea[name*='cover_letter']"
-        field_map[selector] = {"value": cover_letter_text or "", "type": "textarea", "required": is_required(cl_el), "status": "filled" if cover_letter_text else "empty"}
-
-    # LinkedIn / Website / GitHub links
-    if li_el := soup.select_one("input[name*='linkedin'], input[id*='linkedin']"):
-        selector = f"#{li_el.get('id')}" if li_el.get("id") else "input[name*='linkedin']"
-        field_map[selector] = {"value": links.get("linkedin", ""), "type": "text", "required": is_required(li_el), "status": "filled"}
-
-    if gh_el := soup.select_one("input[name*='github'], input[id*='github']"):
-        selector = f"#{gh_el.get('id')}" if gh_el.get("id") else "input[name*='github']"
-        field_map[selector] = {"value": links.get("github", ""), "type": "text", "required": is_required(gh_el), "status": "filled"}
-
-    # Custom screening questions (never auto-answer!)
-    standard_ids = {"first_name", "last_name", "email", "phone", "resume", "cover_letter_text", "linkedin", "github"}
-    form_inputs = soup.select("form fieldset .field, form .field, form div.field")
+        label_text = re.sub(r"\s*\*\s*$", "", label_text)
+        label_text = re.sub(r"indicates a required field", "", label_text, flags=re.IGNORECASE)
+        return label_text.strip()
 
     missing_required_fields = False
 
-    for field_div in form_inputs:
-        input_el = field_div.select_one("input, textarea, select")
-        if not input_el:
+    def mark_standard_field(el: Any, val: str, ftype: str) -> None:
+        nonlocal missing_required_fields
+        if not el:
+            return
+        el_id = el.get("id", "")
+        el_name = el.get("name", "")
+        selector = f"#{el_id}" if el_id else f"input[name='{el_name}']"
+        req = is_required(el)
+        status = "uploaded" if ftype == "file" and val else ("filled" if val else "empty")
+        field_map[selector] = {"value": val, "type": ftype, "required": req, "status": status}
+        if el_id:
+            mapped_ids.add(el_id)
+        if el_name:
+            mapped_ids.add(el_name)
+        if req and not val:
+            missing_required_fields = True
+
+    # Standard identity fields mapping
+    if fn_el := soup.select_one("#first_name, input[name*='first_name'], input[id*='first_name']"):
+        mark_standard_field(fn_el, first_name, "text")
+
+    if ln_el := soup.select_one("#last_name, input[name*='last_name'], input[id*='last_name']"):
+        mark_standard_field(ln_el, last_name, "text")
+
+    if em_el := soup.select_one("#email, input[name*='email'], input[id*='email']"):
+        mark_standard_field(em_el, email, "text")
+
+    if ph_el := soup.select_one("#phone, input[name*='phone'], input[id*='phone']"):
+        mark_standard_field(ph_el, phone, "text")
+
+    if res_el := soup.select_one("#resume, input[type='file'][name*='resume']"):
+        mark_standard_field(res_el, resume_path or "", "file")
+
+    if cl_el := soup.select_one("#cover_letter_text, textarea[name*='cover_letter'], #cover_letter"):
+        mark_standard_field(cl_el, cover_letter_text or "", "textarea" if cl_el.name == "textarea" else "file")
+
+    if li_el := soup.select_one("input[name*='linkedin'], input[id*='linkedin']"):
+        if links.get("linkedin"):
+            mark_standard_field(li_el, links.get("linkedin", ""), "text")
+
+    if gh_el := soup.select_one("input[name*='github'], input[id*='github']"):
+        if links.get("github"):
+            mark_standard_field(gh_el, links.get("github", ""), "text")
+
+    if ws_el := soup.select_one("input[name*='website'], input[id*='website']"):
+        if links.get("website"):
+            mark_standard_field(ws_el, links.get("website", ""), "text")
+
+    # Custom screening questions and remaining required form inputs
+    inputs = soup.select("form input, form textarea, form select")
+    if not inputs:
+        inputs = soup.select("input, textarea, select")
+
+    seen_keys: set[str] = set()
+
+    for el in inputs:
+        el_id = el.get("id", "")
+        el_name = el.get("name", "")
+        el_type = el.get("type", el.name).lower()
+        classes = el.get("class", [])
+
+        if el_type in ("hidden", "submit", "button", "reset", "image"):
+            continue
+        # Skip internal styling or dummy inputs for react-select dropdowns
+        if "requiredInput" in classes or ("select__input" in classes and not el_id):
             continue
 
-        el_id = input_el.get("id", "")
-        el_name = input_el.get("name", "")
-
-        if any(std in el_id or std in el_name for std in standard_ids):
+        if el_id in mapped_ids or (el_name and el_name in mapped_ids):
             continue
 
-        # Extract label text for custom screening question
-        label_el = field_div.select_one("label")
-        label_text = label_el.get_text(strip=True) if label_el else el_name or el_id
+        wrapper = el.find_parent(class_=lambda c: c and any(k in c for k in ["field", "wrapper", "select", "container", "input"]))
+        lbl = get_clean_label(el, wrapper)
 
-        if label_text and label_text not in unanswered_questions:
-            unanswered_questions.append(label_text)
-            if is_required(input_el):
-                missing_required_fields = True
+        if not el_id and not el_name and not lbl:
+            continue
+
+        key = el_id or el_name or lbl
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+
+        req = is_required(el, wrapper)
+        if req:
+            missing_required_fields = True
+
+        selector = f"#{el_id}" if el_id else (f"[name='{el_name}']" if el_name else el.name)
+        q_str = f"{lbl} ({selector})" if lbl and selector not in lbl else (lbl or selector)
+        unanswered_questions.append(q_str)
 
     return FormMappingResult(
         field_map=field_map,

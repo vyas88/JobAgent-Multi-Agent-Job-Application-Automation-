@@ -76,7 +76,7 @@ class TestGreenhouseFormMapping:
         assert "#custom_q1" not in res.field_map or res.field_map["#custom_q1"].get("value") == ""
         # Must be flagged in unanswered_questions list
         assert len(res.unanswered_questions) == 1
-        assert "Why do you want to work at Acme Corp?" in res.unanswered_questions
+        assert any("Why do you want to work at Acme Corp?" in q for q in res.unanswered_questions)
 
     def test_map_greenhouse_fields_captcha_detected(self, master_profile: dict) -> None:
         """CAPTCHA containers must set captcha_detected=True."""
@@ -88,6 +88,45 @@ class TestGreenhouseFormMapping:
         """
         res = map_greenhouse_fields(html=html_with_captcha, profile=master_profile)
         assert res.captcha_detected is True
+
+    def test_unfilled_required_questions_yields_unanswered_questions_and_manual_completion_required_true(
+        self, master_profile: dict
+    ) -> None:
+        """Form with custom/screening required questions yields non-empty unanswered_questions and manual_completion_required=true."""
+        html_jobboards = Path("fixtures/greenhouse_jobboards_layout.html").read_text(encoding="utf-8")
+        res = map_greenhouse_fields(
+            html=html_jobboards,
+            profile=master_profile,
+            resume_path="fixtures/sample_resume.pdf",
+            cover_letter_text="Dear Hiring Team...",
+        )
+
+        assert len(res.unanswered_questions) > 0
+        assert res.missing_required_fields is True
+        manual_completion_required = res.captcha_detected or res.missing_required_fields or len(res.unanswered_questions) > 0
+        assert manual_completion_required is True
+
+    def test_standard_form_only_yields_empty_unanswered_questions(self, master_profile: dict) -> None:
+        """Form with only standard fields (all fillable from profile) yields empty unanswered_questions and manual_completion_required=false."""
+        html_standard_only = """
+        <form id="application_form">
+            <input id="first_name" name="first_name" aria-required="true" type="text" />
+            <input id="last_name" name="last_name" aria-required="true" type="text" />
+            <input id="email" name="email" aria-required="true" type="text" />
+            <input id="phone" name="phone" aria-required="true" type="text" />
+            <input id="resume" name="resume" type="file" />
+        </form>
+        """
+        res = map_greenhouse_fields(
+            html=html_standard_only,
+            profile=master_profile,
+            resume_path="fixtures/sample_resume.pdf",
+        )
+
+        assert res.unanswered_questions == []
+        assert res.missing_required_fields is False
+        manual_completion_required = res.captcha_detected or res.missing_required_fields or len(res.unanswered_questions) > 0
+        assert manual_completion_required is False
 
 
 # --- 2. Resume File Rendering Unit Tests ----------------------------------
