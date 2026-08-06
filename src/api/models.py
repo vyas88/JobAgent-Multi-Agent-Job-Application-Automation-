@@ -16,7 +16,7 @@ class AnalyzeJobRequest(BaseModel):
 
 
 class AnalyzeJobResponse(BaseModel):
-    job: dict[str, Any]
+    job: dict[str, Any] | None = None
     outcome: str
     error: str | None = None
 

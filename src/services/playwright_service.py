@@ -51,30 +51,30 @@ def parse_greenhouse_job_page(html: str) -> ParsedJobData:
 
     This function is completely pure: it takes an HTML string, uses BeautifulSoup
     to extract fields, and does NOT launch a browser or make network calls.
+    Supports both standard Greenhouse layout and new job-boards.greenhouse.io layout.
     """
     if not html or not html.strip():
         raise GreenhouseParseError("HTML content is empty.")
 
     soup = BeautifulSoup(html, "html.parser")
 
-    # Title extraction (.app-title, h1.app-title, or h1 inside #main)
-    title_el = soup.select_one(".app-title, h1.app-title, #main h1")
+    # Title extraction (.app-title, h1.app-title, h1.section-header--large, .section-header--large, or #main h1)
+    title_el = soup.select_one(".app-title, h1.app-title, h1.section-header--large, .section-header--large, .application--header--title, #main h1")
     title = title_el.get_text(strip=True) if title_el else None
     if not title:
         raise GreenhouseParseError("Missing required element: job title.")
 
     # Company name extraction (.company-name or .sub-heading)
+    # Note: New layout does not include an explicit company element. Default to "Unknown" if missing.
     company_el = soup.select_one(".company-name, .sub-heading")
-    company = company_el.get_text(strip=True) if company_el else None
-    if not company:
-        raise GreenhouseParseError("Missing required element: company name.")
+    company = company_el.get_text(strip=True) if company_el else "Unknown"
 
     # Location extraction (.location)
-    location_el = soup.select_one(".location")
+    location_el = soup.select_one(".location, .application--header--text")
     location = location_el.get_text(strip=True) if location_el else None
 
-    # Raw JD text extraction (#content, .content, or #main)
-    content_el = soup.select_one("#content, .content, .job-post-content")
+    # Raw JD text extraction (#content, .content, .job-post-content, .job__description.body, or .job-post-container)
+    content_el = soup.select_one("#content, .content, .job-post-content, .job__description.body, .job__description, .job-post-container")
     if not content_el:
         content_el = soup.select_one("#main")
 
@@ -293,15 +293,15 @@ async def submit_greenhouse_form(page_or_url: str) -> bool:
 async def fetch_page(
     url: str,
     *,
+    client_url: str | None = None,
     settings: Settings | None = None,
     timeout: float = _DEFAULT_TIMEOUT,
 ) -> str:
     """Fetch a rendered page via the Playwright service HTTP endpoint."""
-    if settings is None:
-        settings = Settings.load()
+    base_url = client_url or (settings.playwright_service_url if settings else Settings.load().playwright_service_url)
 
     async with httpx.AsyncClient(
-        base_url=settings.playwright_service_url,
+        base_url=base_url,
         timeout=timeout,
     ) as client:
         response = await client.post(
@@ -310,3 +310,6 @@ async def fetch_page(
         )
         response.raise_for_status()
         return response.json()["html"]
+
+
+fetch_greenhouse_job_page = fetch_page

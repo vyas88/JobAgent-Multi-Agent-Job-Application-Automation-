@@ -7,6 +7,7 @@ No live web portals or real credentials are used.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -51,17 +52,29 @@ class TestGreenhouseParser:
         with pytest.raises(GreenhouseParseError, match="job title"):
             parse_greenhouse_job_page(html)
 
-    def test_parse_raises_on_missing_company(self) -> None:
-        """Should raise GreenhouseParseError when company is missing."""
+    def test_parse_missing_company_defaults_to_unknown(self) -> None:
+        """Missing company element defaults to 'Unknown' without raising parse_failed."""
         html = '<h1 class="app-title">Engineer</h1><div id="content">Long JD content text here...</div>'
-        with pytest.raises(GreenhouseParseError, match="company name"):
-            parse_greenhouse_job_page(html)
+        result = parse_greenhouse_job_page(html)
+        assert result.title == "Engineer"
+        assert result.company == "Unknown"
 
     def test_parse_raises_on_missing_jd(self) -> None:
         """Should raise GreenhouseParseError when JD content is missing."""
         html = '<h1 class="app-title">Engineer</h1><div class="company-name">Acme</div>'
         with pytest.raises(GreenhouseParseError, match="job description content"):
             parse_greenhouse_job_page(html)
+
+    def test_parse_jobboards_new_layout_fixture(self) -> None:
+        """parse_greenhouse_job_page parses new job-boards.greenhouse.io layout fixture cleanly."""
+        fixture_path = Path("fixtures/greenhouse_jobboards_layout.html")
+        assert fixture_path.exists(), "New layout fixture file must exist"
+        html = fixture_path.read_text(encoding="utf-8")
+        result = parse_greenhouse_job_page(html)
+
+        assert result.title == "Senior Forward Deployed Engineer (Remote Build)"
+        assert result.company == "Unknown"
+        assert len(result.raw_jd) > 100
 
 
 # --- 2. Tokenization and Fit Scoring Tests --------------------------------

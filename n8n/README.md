@@ -18,13 +18,14 @@ This directory contains importable n8n workflow JSON files that orchestrate the 
 When running n8n inside a Docker container (standard deployment), `localhost:8000` inside the container refers to n8n itself, **not** the host machine running the FastAPI service.
 
 ### Container-to-Host Communication
-- **Host / Local Machine Base URL**: `http://localhost:8000`
-- **Dockerized n8n Base URL**: `http://host.docker.internal:8000`
+- **FastAPI Pipeline Layer**: Local Host `http://localhost:8000` | Dockerized n8n `http://host.docker.internal:8000`
+- **Playwright Render Microservice**: Local Host `http://localhost:8080` | Dockerized n8n `http://host.docker.internal:8080`
 
 ### Environment Variable Configuration
 Set the following environment variable in your n8n Docker environment or `.env` file:
 ```env
 JOBAGENT_BASE_URL=http://host.docker.internal:8000
+PLAYWRIGHT_SERVICE_URL=http://host.docker.internal:8080
 ```
 If `JOBAGENT_BASE_URL` is not set, workflows fall back to `http://host.docker.internal:8000` by default.
 

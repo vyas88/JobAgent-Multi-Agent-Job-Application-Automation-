@@ -20,7 +20,7 @@ import httpx
 import pytest
 
 from src.agents.application import render_resume_to_file
-from src.api.dependencies import get_calendar_client, get_db_pool
+from src.api.dependencies import get_calendar_client, get_db_pool, get_settings
 from src.api.main import app
 from src.config import Settings
 from src.services.calendar_service import MockCalendarClient
@@ -40,6 +40,12 @@ async def test_api_full_pipeline_end_to_end_live_db(tmp_path: Path) -> None:
 
     app.dependency_overrides[get_db_pool] = lambda: pool
     app.dependency_overrides[get_calendar_client] = lambda: cal_client
+    mock_settings = Settings(
+        database_url=settings.database_url,
+        openai_api_key=settings.openai_api_key,
+        api_key="dev-api-key",
+    )
+    app.dependency_overrides[get_settings] = lambda: mock_settings
 
     test_source_url = f"https://boards.greenhouse.io/testco/jobs/{hash(file_url) & 0xFFFFFF}"
     profile_data = json.loads(Path("fixtures/master_profile.json").read_text(encoding="utf-8"))

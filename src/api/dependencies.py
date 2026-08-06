@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncpg
-from fastapi import HTTPException, Request, Security, status
+from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 
 from src.config import Settings
@@ -20,12 +20,12 @@ def get_settings() -> Settings:
 async def verify_api_key(
     request: Request,
     api_key: str | None = Security(api_key_header),
+    settings: Settings = Depends(get_settings),
 ) -> str:
     """Verify X-API-Key header against configured API_KEY setting.
 
     Raises 401 Unauthorized if missing or invalid.
     """
-    settings = get_settings()
     expected_key = settings.api_key
 
     if not api_key or api_key != expected_key:

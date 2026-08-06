@@ -12,14 +12,23 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import asyncpg
 from pydantic import BaseModel, Field
 
 from src.llm.openai_client import call_openai
-from src.services.playwright_service import GreenhouseParseError, ParsedJobData, parse_greenhouse_job_page
+from src.services.playwright_service import (
+    GreenhouseParseError,
+    ParsedJobData,
+    fetch_greenhouse_job_page,
+    parse_greenhouse_job_page,
+)
+
+if TYPE_CHECKING:
+    from src.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -239,21 +248,48 @@ async def persist_job(job_dict: dict[str, Any], pool: asyncpg.Pool) -> dict[str,
 
 async def analyze_job(
     source_url: str,
-    html_content: str,
-    profile: dict[str, Any],
+    html_content: str | None = None,
+    profile: dict[str, Any] | None = None,
     pool: asyncpg.Pool | None = None,
     fit_threshold: float = 60.0,
+    settings: Settings | None = None,
 ) -> dict[str, Any]:
     """Orchestrate the Discovery and Analysis Agent flow for a job page.
 
     Steps:
-    1. Parse HTML (pure). On parse failure, return manual-review outcome without calling LLM or DB.
-    2. Analyze JD via OpenAI.
-    3. Score fit against candidate profile.
-    4. Determine job status ('qualified' if fit_score >= threshold, else 'disqualified').
-    5. Persist job row in Postgres if pool is provided.
+    1. Fetch HTML via Playwright service if html_content is not provided.
+    2. Fetch candidate profile from DB or fixture if profile is not provided.
+    3. Parse HTML (pure). On parse failure, return manual-review outcome without calling LLM or DB.
+    4. Analyze JD via OpenAI.
+    5. Score fit against candidate profile.
+    6. Determine job status ('qualified' if fit_score >= threshold, else 'disqualified').
+    7. Persist job row in Postgres if pool is provided.
     """
-    # 1. Parse HTML
+    if html_content is None:
+        if settings is None:
+            from src.config import Settings
+            settings = Settings.load()
+        html_content = await fetch_greenhouse_job_page(
+            source_url,
+            client_url=settings.playwright_service_url,
+        )
+
+    if profile is None:
+        if pool is not None:
+            async with pool.acquire() as conn:
+                prof_row = await conn.fetchrow("SELECT * FROM profiles ORDER BY created_at DESC LIMIT 1;")
+                if prof_row:
+                    profile = dict(prof_row)
+                    if isinstance(profile.get("links"), str):
+                        profile["links"] = json.loads(profile["links"])
+        if profile is None:
+            master_path = Path("fixtures/master_profile.json")
+            if master_path.exists():
+                profile = json.loads(master_path.read_text(encoding="utf-8"))
+            else:
+                profile = {}
+
+    # 3. Parse HTML
     try:
         parsed = parse_job(html_content)
     except GreenhouseParseError as err:
@@ -265,13 +301,13 @@ async def analyze_job(
             "error": str(err),
         }
 
-    # 2. LLM Analysis
+    # 4. LLM Analysis
     analysis = analyze_jd(parsed.raw_jd)
 
-    # 3. Fit Scoring
+    # 5. Fit Scoring
     fit_score = score_fit(analysis.keywords, analysis.requirements, profile)
 
-    # 4. Job Status
+    # 6. Job Status
     status = "qualified" if fit_score >= fit_threshold else "disqualified"
 
     job_data: dict[str, Any] = {
@@ -287,7 +323,7 @@ async def analyze_job(
         "status": status,
     }
 
-    # 5. Persist to DB
+    # 7. Persist to DB
     if pool is not None:
         return await persist_job(job_data, pool)
 

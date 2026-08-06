@@ -157,7 +157,18 @@ async def analyze_job_endpoint(
     """Analyze job posting via Discovery Agent and persist row."""
     settings = Settings.load()
     res = await discovery.analyze_job(req.source_url, pool=pool, settings=settings)
-    return res
+    if res.get("status") == "parse_failed":
+        return {
+            "job": None,
+            "outcome": "parse_failed",
+            "error": res.get("error"),
+        }
+
+    return {
+        "job": res,
+        "outcome": res.get("status", "success"),
+        "error": None,
+    }
 
 
 @app.post(
@@ -227,6 +238,7 @@ async def prefill_application_endpoint(
         profile=dict(profile_row),
         job=dict(job_row),
         resume_variant=dict(res_row),
+        cover_letter=dict(cl_row) if cl_row else None,
         pool=pool,
         page_or_url=req.page_or_url,
     )

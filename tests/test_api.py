@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from src.agents.application import ApprovalError, FormFillError
 from src.agents.content import FabricationError
 from src.agents.tracking import OrphanedCalendarEventError
-from src.api.dependencies import get_calendar_client, get_db_pool
+from src.api.dependencies import get_calendar_client, get_db_pool, get_settings
 from src.api.main import app
 from src.exceptions import NotFoundError
 from src.services.calendar_service import MockCalendarClient
@@ -41,8 +41,15 @@ def client_and_mocks():
 
     mock_cal = MockCalendarClient()
 
+    from src.config import Settings
+    mock_settings = Settings(
+        database_url="postgresql://user:pass@localhost:5432/db",
+        openai_api_key="sk-dummy",
+        api_key="dev-api-key",
+    )
     app.dependency_overrides[get_db_pool] = lambda: mock_pool
     app.dependency_overrides[get_calendar_client] = lambda: mock_cal
+    app.dependency_overrides[get_settings] = lambda: mock_settings
 
     with patch("asyncpg.create_pool", new=AsyncMock(return_value=mock_pool)):
         with TestClient(app) as test_client:
@@ -105,6 +112,28 @@ class TestAPIEndpoints:
         )
         assert res.status_code == 200
         assert res.json()["outcome"] == "success"
+
+    @patch("src.agents.discovery.analyze_job")
+    def test_post_jobs_analyze_parse_failed_graceful_response(self, mock_analyze, client_and_mocks) -> None:
+        """POST /jobs/analyze handles parse_failed outcome gracefully without 500 error."""
+        client, _, _, _ = client_and_mocks
+        mock_analyze.return_value = {
+            "status": "parse_failed",
+            "source_url": "https://job-boards.greenhouse.io/remotecom/jobs/7774935003",
+            "error": "Missing required element: job title.",
+        }
+
+        res = client.post(
+            "/jobs/analyze",
+            json={"source_url": "https://job-boards.greenhouse.io/remotecom/jobs/7774935003"},
+            headers=TEST_HEADERS,
+        )
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["outcome"] == "parse_failed"
+        assert data["job"] is None
+        assert data["error"] == "Missing required element: job title."
 
     @patch("src.agents.content.generate_and_persist_content")
     def test_post_content_generate_fabrication_error(self, mock_gen, client_and_mocks) -> None:
@@ -255,3 +284,131 @@ class TestAPIEndpoints:
         res = client.get(f"/applications/{app_id}")
         assert res.status_code == 404
         assert res.json()["error_type"] == "not_found"
+
+
+# --- 3. Agent Function Signature Audit Tests -------------------------------
+
+def _make_mock_pool():
+    mock_pool = MagicMock()
+    mock_conn = AsyncMock()
+    mock_conn.fetchrow = AsyncMock(return_value={"id": str(uuid4()), "status": "approved", "title": "T", "company": "C", "requirements": "[]", "keywords": "[]"})
+    mock_conn.fetch = AsyncMock(return_value=[])
+    mock_conn.execute = AsyncMock(return_value=None)
+    mock_tx = AsyncMock()
+    mock_tx.__aenter__ = AsyncMock(return_value=mock_tx)
+    mock_tx.__aexit__ = AsyncMock(return_value=None)
+    mock_conn.transaction = MagicMock(return_value=mock_tx)
+    mock_pool_cm = AsyncMock()
+    mock_pool_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool_cm.__aexit__ = AsyncMock(return_value=None)
+    mock_pool.acquire.return_value = mock_pool_cm
+    return mock_pool, mock_conn
+
+
+class TestAgentSignatureMatching:
+    """Verify that every API endpoint passes kwargs that exactly match agent function signatures."""
+
+    @pytest.mark.asyncio
+    async def test_discovery_analyze_job_kwargs_match(self) -> None:
+        """POST /jobs/analyze kwargs must match discovery.analyze_job signature."""
+        from src.agents import discovery
+
+        mock_pool, _ = _make_mock_pool()
+        with patch("src.agents.discovery.fetch_greenhouse_job_page", new=AsyncMock(return_value="<h1>Dev</h1><p>Desc</p>")), \
+             patch("src.agents.discovery.analyze_jd") as mock_jd, \
+             patch("src.agents.discovery.score_fit", return_value=85.0), \
+             patch("src.agents.discovery.persist_job", new=AsyncMock(return_value={"id": str(uuid4())})):
+            mock_jd.return_value = MagicMock(title="T", company="C", location="L", requirements=[], keywords=[])
+            mock_settings = MagicMock(playwright_service_url="http://localhost:8000")
+            res = await discovery.analyze_job("http://example.com/job", pool=mock_pool, settings=mock_settings)
+            assert res is not None
+
+    @pytest.mark.asyncio
+    async def test_content_generate_and_persist_kwargs_match(self) -> None:
+        """POST /content/generate kwargs must match content.generate_and_persist_content signature."""
+        from src.agents import content
+
+        mock_pool, _ = _make_mock_pool()
+        with patch("src.agents.content.generate_tailored_resume") as mock_res, \
+             patch("src.agents.content.generate_cover_letter") as mock_let, \
+             patch("src.agents.content.persist_resume_variant", new=AsyncMock(return_value={"id": str(uuid4())})), \
+             patch("src.agents.content.persist_cover_letter", new=AsyncMock(return_value={"id": str(uuid4())})):
+            mock_res.return_value = MagicMock(model_dump=lambda: {}, needs_review=[])
+            mock_let.return_value = MagicMock(cover_letter="Letter", needs_review=[])
+            res = await content.generate_and_persist_content(
+                job_id=str(uuid4()),
+                profile_id=str(uuid4()),
+                job={},
+                profile={},
+                pool=mock_pool,
+            )
+            assert res is not None
+
+    @pytest.mark.asyncio
+    async def test_application_prefill_kwargs_match(self) -> None:
+        """POST /applications/prefill kwargs must match application.prefill_application signature."""
+        from src.agents import application
+
+        mock_pool, _ = _make_mock_pool()
+        with patch("src.agents.application.render_resume_to_file", return_value="/tmp/res.txt"), \
+             patch("src.agents.application.map_greenhouse_fields") as mock_map:
+            mock_map.return_value = MagicMock(field_map={}, unanswered_questions=[], captcha_detected=False, missing_required_fields=False)
+            res = await application.prefill_application(
+                job_id=str(uuid4()),
+                profile_id=str(uuid4()),
+                resume_variant_id=str(uuid4()),
+                cover_letter_id=str(uuid4()),
+                profile={},
+                job={},
+                resume_variant={"content": {}},
+                cover_letter={"content": "letter"},
+                pool=mock_pool,
+                page_or_url="http://example.com/job",
+            )
+            assert res is not None
+
+    @pytest.mark.asyncio
+    async def test_application_submit_kwargs_match(self) -> None:
+        """POST /applications/{id}/submit kwargs must match application.submit_application signature."""
+        from src.agents import application
+
+        mock_pool, _ = _make_mock_pool()
+        with patch("src.agents.application.submit_greenhouse_form", new=AsyncMock(return_value={"screenshot_path": "a.png"})):
+            res = await application.submit_application(
+                application_id=str(uuid4()),
+                pool=mock_pool,
+                page_or_url="http://example.com/job",
+            )
+            assert res is not None
+
+    @pytest.mark.asyncio
+    async def test_tracking_update_status_kwargs_match(self) -> None:
+        """POST /applications/{id}/status kwargs must match tracking.update_status signature."""
+        from src.agents import tracking
+
+        mock_pool, _ = _make_mock_pool()
+        res = await tracking.update_status(
+            application_id=str(uuid4()),
+            new_status="in_review",
+            pool=mock_pool,
+            reason="Recruiter email",
+        )
+        assert res is not None
+
+    @pytest.mark.asyncio
+    async def test_tracking_schedule_interview_kwargs_match(self) -> None:
+        """POST /applications/{id}/interview kwargs must match tracking.schedule_interview signature."""
+        from datetime import datetime, timezone
+        from src.agents import tracking
+
+        mock_pool, _ = _make_mock_pool()
+        mock_cal = MagicMock(create_interview_event=AsyncMock(return_value="evt_123"))
+        res = await tracking.schedule_interview(
+            application_id=str(uuid4()),
+            scheduled_at=datetime.now(timezone.utc),
+            pool=mock_pool,
+            calendar_client=mock_cal,
+            notes="Onsite",
+        )
+        assert res is not None
+

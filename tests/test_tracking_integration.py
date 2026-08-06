@@ -13,6 +13,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 
+from uuid import uuid4
+
 import asyncpg
 import pytest
 
@@ -28,7 +30,7 @@ async def test_tracking_live_neon_db_status_update_and_interview() -> None:
     settings = Settings.load()
     pool = await asyncpg.create_pool(settings.database_url)
 
-    test_url = "https://boards.greenhouse.io/testco/jobs/998877"
+    test_url = f"https://boards.greenhouse.io/testco/jobs/{uuid4()}"
     cal_client = MockCalendarClient(event_id="evt_neon_integration_123")
     scheduled_time = datetime(2026, 8, 15, 10, 0, tzinfo=timezone.utc)
 
