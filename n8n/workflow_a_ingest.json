@@ -2,30 +2,22 @@
   "name": "JobAgent - Workflow A: Ingest & Analyze",
   "nodes": [
     {
-      "parameters": {
-        "values": {
-          "string": [
-            {
-              "name": "source_url",
-              "value": "https://boards.greenhouse.io/testco/jobs/123456"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "parameters": {},
+      "id": "392a4b71-4fee-445a-bf97-1c23d6541388",
       "name": "Manual Trigger (Job URL Input)",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        250,
-        300
+        -752,
+        112
       ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.JOBAGENT_BASE_URL || 'http://host.docker.internal:8000' }}/jobs/analyze",
+        "url": "http://host.docker.internal:8000/jobs/analyze",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -37,23 +29,21 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"source_url\": \"{{ $json.source_url }}\"\n}",
-        "options": {
-          "neverError": true
-        }
+        "jsonBody": "{\"source_url\": \"https://job-boards.greenhouse.io/remotecom/jobs/7774935003\"}",
+        "options": {}
       },
-      "id": "a1b2c3d4-0001-4000-8000-000000000002",
+      "id": "50acc138-8ed0-486a-af82-619d42d6d854",
       "name": "POST /jobs/analyze",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        500,
-        300
+        -496,
+        112
       ],
       "credentials": {
         "httpHeaderAuth": {
-          "id": "jobagent-api-key",
-          "name": "JobAgent API Key"
+          "id": "szzLV1bEn7t8Xstp",
+          "name": "Header Auth account"
         }
       }
     },
@@ -69,13 +59,13 @@
           ]
         }
       },
-      "id": "a1b2c3d4-0001-4000-8000-000000000003",
+      "id": "e0248841-9304-4da3-9596-5410bb82179e",
       "name": "Check Status == 200",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
       "position": [
-        750,
-        300
+        -256,
+        112
       ]
     },
     {
@@ -106,13 +96,13 @@
         },
         "options": {}
       },
-      "id": "a1b2c3d4-0001-4000-8000-000000000004",
+      "id": "0cd1fe76-2baa-45d4-a43b-7e98d75895f5",
       "name": "Output: Job Analyzed",
       "type": "n8n-nodes-base.set",
       "typeVersion": 2,
       "position": [
-        1000,
-        200
+        0,
+        0
       ]
     },
     {
@@ -135,16 +125,17 @@
         },
         "options": {}
       },
-      "id": "a1b2c3d4-0001-4000-8000-000000000005",
+      "id": "d2cabbe7-ff10-4610-ad2a-f007a6f186fc",
       "name": "Error Handler: Ingest Error",
       "type": "n8n-nodes-base.set",
       "typeVersion": 2,
       "position": [
-        1000,
-        400
+        0,
+        208
       ]
     }
   ],
+  "pinData": {},
   "connections": {
     "Manual Trigger (Job URL Input)": {
       "main": [
@@ -189,7 +180,15 @@
   },
   "active": false,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
   },
+  "versionId": "e9b62467-3771-4f7f-973f-56b8f1bb2d92",
+  "meta": {
+    "instanceId": "c07d3aea120fd86bcd9110e43484bf32fe84f31dab42659198fac2e908351ebb"
+  },
+  "nodeGroups": [],
+  "id": "QbDGjjCrV3udTgru",
   "tags": []
 }
