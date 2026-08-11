@@ -351,8 +351,7 @@ class TestAgentSignatureMatching:
 
         mock_pool, _ = _make_mock_pool()
         with patch("src.agents.application.render_resume_to_file", return_value="/tmp/res.txt"), \
-             patch("src.agents.application.map_greenhouse_fields") as mock_map:
-            mock_map.return_value = MagicMock(field_map={}, unanswered_questions=[], captcha_detected=False, missing_required_fields=False)
+             patch("src.agents.application.prefill_greenhouse_form", new=AsyncMock(return_value={"screenshot_path": "a.png", "field_map": {}, "unanswered_questions": [], "manual_completion_required": False})):
             res = await application.prefill_application(
                 job_id=str(uuid4()),
                 profile_id=str(uuid4()),
